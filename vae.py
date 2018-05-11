@@ -11,6 +11,22 @@ def xavier_init(fan_in, fan_out, constant=1):
                              dtype=tf.float32)
 
 
+def conv2d(x, W):
+    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+def max_pool_2x2(x):
+    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
+                      strides=[1, 2, 2, 1], padding='SAME')
+
+def get_bias(shape, name):
+    return tf.get_variable(name, shape, tf.float32, tf.zeros_initializer)
+
+def get_weights(shape, name, horizontal, mask_mode='noblind', mask=None):
+    weights_initializer = tf.contrib.layers.xavier_initializer()
+    W = tf.get_variable(name, shape, tf.float32, weights_initializer)
+    return W
+
+
 class VariationalAutoencoder(object):
     """ Variation Autoencoder (VAE) with an sklearn-like interface implemented using TensorFlow.
     
@@ -225,4 +241,45 @@ network_architecture = \
 
 vae = train(X_train, network_architecture, training_epochs=75)
 
+W_conv1
+b_conv1
+
+h_conv1
+h_pool1
+
+W_conv2
+b_conv2
+
+h_conv2
+h_pool2
+
 """
+
+class ConvolutionalEncoder(object):
+    def __init__(self, X, conf):
+        '''
+            This is the 6-layer architecture for Convolutional Autoencoder
+            mentioned in the original paper:
+            Stacked Convolutional Auto-Encoders for Hierarchical Feature Extraction
+            Note that only the encoder part is implemented as PixelCNN is taken
+            as the decoder.
+        '''
+
+        W_conv1 = get_weights([5, 5, conf.channel, 100], "W_conv1")
+        b_conv1 = get_bias([100], "b_conv1")
+        conv1 = tf.nn.relu(conv2d(X, W_conv1) + b_conv1)
+        pool1 = max_pool_2x2(conv1)
+
+        W_conv2 = get_weights([5, 5, 100, 150], "W_conv2")
+        b_conv2 = get_bias([150], "b_conv2")
+        conv2 = tf.nn.relu(conv2d(pool1, W_conv2) + b_conv2)
+        pool2 = max_pool_2x2(conv2)
+
+        W_conv3 = get_weights([3, 3, 150, 200], "W_conv3")
+        b_conv3 = get_bias([200], "b_conv3")
+        conv3 = tf.nn.relu(conv2d(pool2, W_conv3) + b_conv3)
+        conv3_reshape = tf.reshape(conv3, (-1, 7*7*200))
+
+        W_fc = get_weights([7*7*200, 10], "W_fc")
+        b_fc = get_bias([10], "b_fc")
+        self.pred = tf.nn.softmax(tf.add(tf.matmul(conv3_reshape, W_fc), b_fc))
