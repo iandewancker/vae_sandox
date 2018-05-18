@@ -28,7 +28,7 @@ class ConvolutionalEncoder(object):
             Note that only the encoder part is implemented as PixelCNN is taken
             as the decoder.
         '''
-        W_conv1 = get_weights([5, 5, conf["n_input"][2], 500], "W_conv1")
+        W_conv1 = get_weights([8, 8, conf["n_input"][2], 500], "W_conv1")
         b_conv1 = get_bias([500], "b_conv1")
         conv1 = tf.nn.relu(conv2d(X, W_conv1) + b_conv1)
         pool1 = max_pool_2x2(conv1)
@@ -76,8 +76,8 @@ class DeconvolutionDecoder(object):
         final_w = conf["n_input"][0] / 2 / 2
         final_h = conf["n_input"][1] / 2 / 2
         channels = conf["n_input"][2]
-        im_w_after1_deconv = ((final_w - 1) * 2 + 3)
-        im_h_after1_deconv = ((final_h - 1) * 2 + 3)
+        im_w_after1_deconv = ((final_w - 1) * 2 + 2)
+        im_h_after1_deconv = ((final_h - 1) * 2 + 2)
 
         # calculation to ensure output dim matched input shape
         # THIS CALCULATION IS NOT RELIABLE
@@ -87,16 +87,16 @@ class DeconvolutionDecoder(object):
 
         # z had dimensions 1 x conf.n_z
         b_fc_DC = get_bias([conf["n_z"]], "b_fc_DC")
-        W_fc_DC = get_weights([conf["n_z"], final_w*final_h*700], "W_fc_DC")
+        W_fc_DC = get_weights([conf["n_z"], final_w*final_h*900], "W_fc_DC")
         conv3_reshape = tf.matmul(tf.add(z, b_fc_DC), W_fc_DC)
-        conv3 = tf.reshape(conv3_reshape, (-1, final_w, final_h, 700))
+        conv3 = tf.reshape(conv3_reshape, (-1, final_w, final_h, 900))
 
-        b_conv3 = get_bias([700], "b_conv3_DC")
-        conv2 = tf.layers.conv2d_transpose(tf.nn.relu(conv3 + b_conv3), 550, [3, 3], 
+        b_conv3 = get_bias([900], "b_conv3_DC")
+        conv2 = tf.layers.conv2d_transpose(tf.nn.relu(conv3 + b_conv3), 1050, [2, 2], 
                                            strides=(2, 2), padding='same',name="W_deconv3_DC", 
                                            kernel_initializer=tf.contrib.layers.xavier_initializer())
 
-        b_conv2 = get_bias([550], "b_conv2_DC")
+        b_conv2 = get_bias([1050], "b_conv2_DC")
         conv1 = tf.layers.conv2d_transpose(tf.nn.relu(conv2 + b_conv2), channels, [final_kernel_w, final_kernel_h], 
                                    strides=(2, 2), name="W_deconv2_DC", padding='same',
                                    kernel_initializer=tf.contrib.layers.xavier_initializer())
@@ -291,7 +291,7 @@ names_train = train["filenames"]
 
 conf = \
     dict(n_input=(32,32,3), # Input shape of image data 
-         n_z=30)  # dimensionality of latent space
+         n_z=40)  # dimensionality of latent space
 
 X_train_rshp = np.reshape(X_train, (X_train.shape[0],32,32,3),order='F') / 255.0
 
@@ -318,9 +318,10 @@ def show_image_and_reconstruct(vae, X, names, idx):
 
     # somehow generateing a few samples here?
     x_recon = vae.reconstruct(np.reshape(X[idx]/255.0,(1,32,32,3),order='F'))
-    print x_recon.shape
+    #print x_recon.shape
     x_recon_mean = np.sum(x_recon,axis=0) / x_recon.shape[0]
     x_recon_mean = x_recon_mean * 255
+    #x_recon_mean = x_recon[0] * 255
     x_recon = x_recon_mean.astype('uint8')
 
     fig.add_subplot(1, 2, 1)
