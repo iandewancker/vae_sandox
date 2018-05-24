@@ -1,5 +1,7 @@
 import tensorflow as tf
 import numpy as np
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
@@ -76,14 +78,24 @@ class DeconvolutionDecoder(object):
         final_w = conf["n_input"][0] / 2 / 2
         final_h = conf["n_input"][1] / 2 / 2
         channels = conf["n_input"][2]
-        im_w_after1_deconv = ((final_w - 1) * 2 + 2)
-        im_h_after1_deconv = ((final_h - 1) * 2 + 2)
+        im_w_after1_deconv = ((final_w - 1) * 2)
+        im_h_after1_deconv = ((final_h - 1) * 2)
 
         # calculation to ensure output dim matched input shape
         # THIS CALCULATION IS NOT RELIABLE
         final_kernel_w =  conf["n_input"][0] - (im_w_after1_deconv-1)*2 + 2
         final_kernel_h =  conf["n_input"][1] - (im_h_after1_deconv-1)*2 + 2
         #print batch_size
+
+        """
+        TEST FOR more deconvs
+        """
+        im_w_after2_deconv = ((im_w_after1_deconv - 1) * 2)
+        im_h_after2_deconv = ((im_h_after1_deconv - 1) * 2)
+        
+        final_kernel_w =  conf["n_input"][0] - (im_w_after2_deconv-1)*2 + 2
+        final_kernel_h =  conf["n_input"][1] - (im_h_after2_deconv-1)*2 + 2
+
 
         # z had dimensions 1 x conf.n_z
         b_fc_DC = get_bias([conf["n_z"]], "b_fc_DC")
@@ -92,16 +104,30 @@ class DeconvolutionDecoder(object):
         conv3 = tf.reshape(conv3_reshape, (-1, final_w, final_h, 900))
 
         b_conv3 = get_bias([900], "b_conv3_DC")
-        conv2 = tf.layers.conv2d_transpose(tf.nn.relu(conv3 + b_conv3), 1050, [2, 2], 
+        conv2 = tf.layers.conv2d_transpose(tf.nn.relu(conv3 + b_conv3), 500, [2, 2], 
                                            strides=(2, 2), padding='same',name="W_deconv3_DC", 
                                            kernel_initializer=tf.contrib.layers.xavier_initializer())
 
+        """
         b_conv2 = get_bias([1050], "b_conv2_DC")
         conv1 = tf.layers.conv2d_transpose(tf.nn.relu(conv2 + b_conv2), channels, [final_kernel_w, final_kernel_h], 
                                    strides=(2, 2), name="W_deconv2_DC", padding='same',
                                    kernel_initializer=tf.contrib.layers.xavier_initializer())
 
         self.x_reconstr_mean =  tf.nn.sigmoid(conv1)
+        """
+
+        b_conv2 = get_bias([500], "b_conv2_DC")
+        conv1 = tf.layers.conv2d_transpose(tf.nn.relu(conv2 + b_conv2), 500, [2, 2], 
+                                   strides=(2, 2), name="W_deconv2_DC", padding='same',
+                                   kernel_initializer=tf.contrib.layers.xavier_initializer())
+
+        b_conv1 = get_bias([500], "b_conv1_DC")
+        conv0 = tf.layers.conv2d_transpose(tf.nn.relu(conv1 + b_conv1), channels, [5, 5], 
+                                   strides=(1, 1), name="W_deconv1_DC", padding='same',
+                                   kernel_initializer=tf.contrib.layers.xavier_initializer())
+
+        self.x_reconstr_mean =  tf.nn.sigmoid(conv0)
 
 
 class VariationalCNNAutoencoder(object):
@@ -181,8 +207,8 @@ class VariationalCNNAutoencoder(object):
         #                   None)
 
         reconstr_loss = \
-            -tf.reduce_sum(x_vectorized * tf.log(1e-8 + x_reconstr_mean_vectorized)
-                           + (1-x_vectorized) * tf.log(1e-8 + 1 - x_reconstr_mean_vectorized),
+            -tf.reduce_sum(x_vectorized * tf.log(1e-6 + x_reconstr_mean_vectorized)
+                           + (1-x_vectorized) * tf.log(1e-6 + 1 - x_reconstr_mean_vectorized),
                            1)
 
         # 2.) The latent loss, which is defined as the Kullback Leibler divergence 
@@ -196,6 +222,7 @@ class VariationalCNNAutoencoder(object):
                                            - tf.exp(self.z_log_sigma_sq), 1)
         self.cost = tf.reduce_mean(reconstr_loss + latent_loss)   # average over batch
         # Use ADAM optimizer
+        # tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.cost)
         self.optimizer = \
             tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.cost)
         
@@ -267,6 +294,7 @@ def vae_train(X_train, network_architecture, learning_rate=0.0005,
 # tf Graph input
 import tensorflow as tf
 import numpy as np
+import glob
 
 def unpickle(file):
     import cPickle
@@ -275,8 +303,8 @@ def unpickle(file):
     return dict
 
 
-test = unpickle("/home/ec2-user/cifar-100-python/test")
-train = unpickle("/home/ec2-user/cifar-100-python/train")
+test = unpickle("/home/ubuntu/cifar-100-python/test")
+train = unpickle("/home/ubuntu/cifar-100-python/train")
 
 X_test = test["data"]
 y_test = test["coarse_labels"]
@@ -286,19 +314,129 @@ X_train = train["data"]
 y_train = train["coarse_labels"]
 names_train = train["filenames"]
 
+from PIL import Image
+import glob, os
+import numpy as np
+
+box_grasp_ids = [
+    '1ba5b0f5-2200-4f09-8256-d4b505149a29',
+    '1e36bfe9-7b87-48bf-996c-0cf0318d464a',
+    '2a958c47-de4b-4964-91cb-6262a9b7bb5a',
+    '2aab4df5-9dfd-4deb-a31a-5858a2e0bad6',
+    '2b747d3c-d7ae-46c6-9747-013e0f755819',
+    '2c2466d2-d41e-4a4a-aa6b-d5e7221a02b2',
+    '3b4e9607-846b-416a-b074-83da59b3901a',
+    '3d38ed28-0173-4cd2-82ce-169871dfcc33',
+    '4afb5316-2d99-46f5-8967-1fb2523eacd5',
+    '5ff543b3-4b78-407b-b13c-c31e6d9dc3cc',
+    '6c245912-5335-4dac-8de4-9df22c434531',
+    '6e93ad54-2e8f-4e7b-ab44-0f366900ee77',
+    '6eb81efb-23fc-4aec-a3fd-2dbe8177e470',
+    '7c8ef8a9-1386-4f52-9888-3b5403e6b7e4',
+    '7df1d020-8ac7-4d6b-aecb-0a7a70818cc8',
+    '7f015a0c-7228-407a-8194-b5d8e170ffb8',
+    '8e522f8a-89ab-4111-a7a2-f36f39ccf9e5',
+    '9cfbe2e5-c9d6-41f3-a905-9414474cd456',
+    '11c66a51-62d9-493a-8ce5-7b0c2b50bcd6',
+    '14b9160b-7171-41a4-96f1-3d7a5d44c833',
+    '22c0552a-1faa-439f-bd88-1dc081f382e8',
+    '30baa683-fe8d-422f-a9b6-722ecfb226d8',
+    '51f7ea0a-5725-4a6c-b6c6-4432e4faa290',
+    '68c80c97-43ed-482c-8931-c3ae4c25caa7',
+    '85f4d5db-949c-42b2-bbce-e6ab1da1f57d',
+    '92fcddd6-61d3-4c90-b8ca-21aa705e4c67',
+    '151d7649-7e28-44cd-a021-d0b83ac2bdf9',
+    '261e5ecb-2619-417c-b848-36ad74084662',
+    '291a78d1-3af9-4cda-83bd-91872d5ebe70',
+    '312abc9b-547e-4952-8bfe-8391d063762f',
+    '350d5e41-6fef-4777-b8b8-419ab39e8f20',
+    '9655bea6-d943-4f25-964d-7a592d684a93',
+    '9706c5de-d5e6-4e74-8629-49fa8b6e5f0f',
+    '17243ad4-7086-4a54-be16-0ae78125c753',
+    '545702f2-2ce9-4de3-be2c-e56e3215cfe5',
+    '1410947d-d46d-42c1-9661-eee46905dce1',
+    '10031797-24c7-444b-a329-e967a633249b',
+    'a2ad5bc1-fd15-48ff-a90b-025773d5a17b',
+    'a8d654b5-34cd-4e52-95b7-68f037927535',
+    'a91805d1-129c-4efa-ae57-5756c78b5149',
+    'acdce5e6-5b03-4152-8130-983a28ca6828',
+    'b1ff98ad-38cd-4fbe-813c-7dd05afd35c0',
+    'c72b12d9-6986-44f4-ad1a-6944e2d01b64',
+    'c901a61e-fa65-4f80-8fcc-4d9cd56b3715',
+    'd3d0c882-1015-4d9b-beed-46756da8cd6d',
+    'd5e5db25-0eda-464c-a9ec-00c5aaf99ba1',
+    'ddb8609f-fea3-46a4-8ebc-3bcafdecf1fd',
+    'deef5d25-4b77-44a1-a7c3-0cfebc4cc7ce',
+    'dfc4a9cd-a1f0-4b2b-a03e-0ecc16e810b2',
+    'e203a3cc-216c-42ea-aa30-a4cef0779b45',
+    'e5933cd8-d897-4b2d-8956-b142c2b64a15',
+    'e7553cd8-c9ef-4821-91df-218117c6f8b8',
+    'f460b11d-4223-4fb6-9e5a-828cb613f7c0',
+    'fecfa937-36e5-4471-a5f6-223d1686a4b6',
+]
+
+def load_box_rgb_images(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    X = []
+    for path in png_paths:
+        if any(box_id in path for box_id in box_grasp_ids):
+            img = Image.open(path)
+
+            # test for colormapping depth map
+            #depth_array = np.array(img, dtype=np.uint16) / 1000.0
+            #cmap = cm.hot
+            #norm = Normalize(vmin=1.0, vmax=1.7)
+            #color_map_image = cmap(norm(depth_array))[:,:,0:3]
+            img = img.crop((0,0,100,64))
+
+            X.append(np.array(img))
+    X = np.stack(X,axis=0)
+    return X
+
+def load_rgb_images(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    X = []
+    for path in png_paths:
+        img = Image.open(path)
+
+        # test for colormapping depth map
+        #depth_array = np.array(img, dtype=np.uint16) / 1000.0
+        #cmap = cm.hot
+        #norm = Normalize(vmin=1.0, vmax=1.7)
+        #color_map_image = cmap(norm(depth_array))[:,:,0:3]
+        img = img.crop((0,0,100,64))
+
+        X.append(np.array(img))
+    X = np.stack(X,axis=0)
+    return X
+
+X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_rgb.png")
+X_train_unpick.shape
+
+X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_rgb.png")
+X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
+
+#X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_depth.png")
+#X_train_unpick.shape
+
+#X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_depth.png")
+#X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_depth.png")
+
 #tf.reset_default_graph()
 #x = tf.placeholder(tf.float32, [None,32,32, 3])
 
 conf = \
-    dict(n_input=(32,32,3), # Input shape of image data 
-         n_z=40)  # dimensionality of latent space
+    dict(n_input=(64,100,3), # Input shape of image data 
+         n_z=7)  # dimensionality of latent space
 
-X_train_rshp = np.reshape(X_train, (X_train.shape[0],32,32,3),order='F') / 255.0
+#X_train_rshp = np.reshape(X_train, (X_train.shape[0],32,32,3),order='F') / 255.0
 
 
 tf.reset_default_graph()
-vae = vae_train(X_train_rshp, conf, 
-                training_epochs=100,batch_size=1000,learning_rate=0.0001)
+vae = vae_train(np.concatenate((X_train[::4],X_train_empty, X_train_unpick)) / 255.0, conf, 
+                training_epochs=25, batch_size=100, learning_rate=0.000805)
 #cnn_enc = ConvolutionalEncoder(x, conf)
 #cnn_dec = DeconvolutionDecoder(cnn_enc.z_mean, conf)
 # test encoder network
@@ -310,8 +448,9 @@ vae = vae_train(X_train_rshp, conf,
 #z = sess.run([cnn_enc.z_mean, cnn_dec.x_reconstr_mean], feed_dict={x: np.reshape(X_test[0:2],(2,32,32,3))})
 
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
+"""
 def show_image_and_reconstruct(vae, X, names, idx):
     fig=plt.figure(figsize=(8, 4))
     img = np.reshape(X[idx],(32,32,3),order='F')
@@ -332,3 +471,200 @@ def show_image_and_reconstruct(vae, X, names, idx):
     plt.title(names[idx])
 
     plt.savefig("./test_imgs/"+names[idx]+".png")
+"""
+
+import matplotlib.pyplot as plt
+def show_image_and_reconstruct(vae, X, idx, name_prefix):
+    fig=plt.figure(figsize=(8, 4))
+    # somehow generateing a few samples here?
+    x_recon = vae.reconstruct(np.reshape(X[idx]/255.0,(1,64,100,3)))
+    z = vae.transform(np.reshape(X[idx]/255.0,(1,64,100,3)))
+    #print x_recon.shape
+    #x_recon_mean = np.sum(x_recon,axis=0) / x_recon.shape[0]
+    #x_recon_mean = x_recon_mean * 255
+    x_recon_mean = x_recon[0] * 255
+    x_recon = x_recon_mean.astype('uint8')
+
+    fig.add_subplot(1, 2, 1)
+    plt.imshow(x_recon)
+    plt.title("VAE Reconstruction")
+    fig.add_subplot(1, 2, 2)
+    plt.imshow(X[idx])
+    img_name = name_prefix+"_"+str(idx)
+    plt.title(img_name)
+    plt.savefig("./test_imgs/"+img_name+".png",bbox_inches='tight', pad_inches=0)
+    img_url = "http://ec2-18-219-138-68.us-east-2.compute.amazonaws.com:8000/"+img_name+".png"
+    return z, img_url
+
+Z = []
+URLs = []
+colors = []
+for i in range(X_train_unpick.shape[0]):
+    z, img_url = show_image_and_reconstruct(vae, X_train_unpick, i, "unpickable")
+    Z.append(z)
+    URLs.append(img_url)
+    colors.append('red')
+
+for i in range(X_train_empty.shape[0]):
+    z, img_url = show_image_and_reconstruct(vae, X_train_empty, i, "empty_bin")
+    Z.append(z)
+    URLs.append(img_url)
+    colors.append('blue')
+
+for i in range(0,X_train.shape[0],50):
+    z, img_url = show_image_and_reconstruct(vae, X_train, i, "normal")
+    Z.append(z)
+    URLs.append(img_url)
+    colors.append('green')
+
+Z = np.array(Z)
+
+Z_unpick = Z[0:X_train_unpick.shape[0]]
+Z_empty = Z[X_train_unpick.shape[0]:(X_train_unpick.shape[0]+X_train_empty.shape[0])]
+Z_normal = Z[(X_train_unpick.shape[0]+X_train_empty.shape[0]):]
+
+from bokeh.plotting import figure, output_file, show, ColumnDataSource
+from bokeh.models import HoverTool
+
+source = ColumnDataSource(data=dict(
+    x=Z[:,0,0],
+    y=Z[:,0,1],
+    imgs=URLs,
+    color=colors
+))
+
+hover = HoverTool( tooltips="""
+    <div>
+        <div>
+            <img
+                src="@imgs" height="256" alt="@imgs" width="512"
+                style="float: right; margin: 0px 0px 0px 0px; opacity:1.0;"
+            ></img>
+        </div>
+    </div>
+    """
+)
+
+output_file("./test_imgs/embedding.html")
+
+p = figure(plot_width=800, plot_height=800, tools=[hover, 'pan', 'wheel_zoom'],
+           title="CNN VAE Embedding")
+# add a square renderer with a size, color, and alpha
+p.circle('x', 'y', size=20, source=source, color='color', alpha=0.5)
+
+# show the results
+show(p)
+
+# attempt to fit model to discern between unpick and normal + empty
+import sklearn.neighbors
+import sklearn.metrics
+import sklearn.ensemble
+import sklearn.linear_model
+from sklearn.model_selection import train_test_split
+
+clf = sklearn.neighbors.KNeighborsClassifier(n_neighbors=3)
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.0, 1.0:0.1},penalty='l1')
+#clf = sklearn.ensemble.RandomForestClassifier(class_weight={0.0: 6.0, 1.0:0.01})
+Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
+y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
+
+Z_train = np.vstack([Z_normal[:,0,:], Z_unpick[:,0,:]])
+y_train = np.hstack([np.ones(Z_normal.shape[0]), np.zeros(Z_unpick.shape[0])])
+
+Z_train, Z_test, y_train, y_test = train_test_split(Z_train, y_train, test_size=0.4, random_state=42)
+clf.fit(Z_train, y_train)
+y_pred = clf.predict(Z_test)
+
+fpr = np.where((y_pred == 1) & (y_pred != y_test))[0].shape[0]
+fnr = np.where((y_pred == 0) & (y_pred != y_test))[0].shape[0]
+print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0]
+
+Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
+y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
+
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.25, 1.0:0.1},penalty='l1')
+clf.fit(Z_train, y_train)
+
+def adhoc_clf(img_path, clf):
+    img = Image.open(img_path)
+    img_resize = img.resize((128,64))
+    img_resize = img_resize.crop((0,0,100,64))
+    x = np.array(img_resize)
+    #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
+    z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
+    print img_path
+    return clf.predict(z)
+
+import time
+start = time.time()
+print ("\n Unpickable Grasps \n")
+print adhoc_clf("test_unpick_1.png",clf)
+print adhoc_clf("test_unpick_2.png",clf)
+print adhoc_clf("test_unpick_3.png",clf)
+print adhoc_clf("test_unpick_4.png",clf)
+print adhoc_clf("test_unpick_5.png",clf)
+print adhoc_clf("test_unpick_6.png",clf)
+print adhoc_clf("test_unpick_7.png",clf)
+print adhoc_clf("test_unpick_8.png",clf)
+print adhoc_clf("test_unpick_9.png",clf)
+print adhoc_clf("test_unpick_10.png",clf)
+print adhoc_clf("test_unpick_11.png",clf)
+print adhoc_clf("test_unpick_12.png",clf)
+print adhoc_clf("test_unpick_13.png",clf)
+print adhoc_clf("test_unpick_14.png",clf)
+print adhoc_clf("test_unpick_15.png",clf)
+print adhoc_clf("test_unpick_16.png",clf)
+print adhoc_clf("test_unpick_17.png",clf)
+print adhoc_clf("test_unpick_18.png",clf)
+print adhoc_clf("test_unpick_19.png",clf)
+print adhoc_clf("test_unpick_20.png",clf)
+print adhoc_clf("test_unpick_21.png",clf)
+print adhoc_clf("test_unpick_22.png",clf)
+print adhoc_clf("test_unpick_23.png",clf)
+print adhoc_clf("test_unpick_24.png",clf)
+
+print ("\n Normal Grasps \n")
+print adhoc_clf("test_normal_1.png",clf)
+print adhoc_clf("test_normal_2.png",clf)
+print adhoc_clf("test_normal_3.png",clf)
+print adhoc_clf("test_normal_4.png",clf)
+print adhoc_clf("test_normal_5.png",clf)
+print adhoc_clf("test_normal_6.png",clf)
+print adhoc_clf("test_normal_7.png",clf)
+print adhoc_clf("test_normal_8.png",clf)
+print adhoc_clf("test_normal_9.png",clf)
+print adhoc_clf("test_normal_11.png",clf)
+print adhoc_clf("test_normal_12.png",clf)
+print adhoc_clf("test_normal_13.png",clf)
+print adhoc_clf("test_normal_14.png",clf)
+print adhoc_clf("test_normal_15.png",clf)
+print adhoc_clf("test_normal_16.png",clf)
+print adhoc_clf("test_normal_17.png",clf)
+print adhoc_clf("test_normal_18.png",clf)
+print adhoc_clf("test_normal_19.png",clf)
+print adhoc_clf("test_normal_20.png",clf)
+print adhoc_clf("test_normal_21.png",clf)
+print adhoc_clf("test_normal_22.png",clf)
+print adhoc_clf("test_normal_23.png",clf)
+print adhoc_clf("test_normal_24.png",clf)
+print adhoc_clf("test_normal_25.png",clf)
+print adhoc_clf("test_normal_26.png",clf)
+print adhoc_clf("test_normal_27.png",clf)
+print adhoc_clf("test_normal_28.png",clf)
+print adhoc_clf("test_normal_29.png",clf)
+print adhoc_clf("test_normal_30.png",clf)
+print adhoc_clf("test_normal_31.png",clf)
+print adhoc_clf("test_normal_32.png",clf)
+print adhoc_clf("test_normal_33.png",clf)
+print adhoc_clf("test_normal_34.png",clf)
+print adhoc_clf("test_normal_35.png",clf)
+print adhoc_clf("test_normal_36.png",clf)
+print adhoc_clf("test_normal_37.png",clf)
+print adhoc_clf("test_normal_38.png",clf)
+print adhoc_clf("test_normal_39.png",clf)
+print adhoc_clf("test_normal_40.png",clf)
+
+end = time.time()
+print(end - start)
+
+
