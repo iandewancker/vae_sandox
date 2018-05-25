@@ -47,8 +47,8 @@ class ConvolutionalEncoder(object):
         # at this point we have done 2 layes of 2x2 max pooling operations so the image size will be
         # w_t = w_init / 2 / 2
         # h_t = h_init / 2 / 2 
-        final_w = conf["n_input"][0] / 2 / 2
-        final_h = conf["n_input"][1] / 2 / 2
+        final_w = int(conf["n_input"][0] / 2 / 2)
+        final_h = int(conf["n_input"][1] / 2 / 2)
 
         conv3_reshape = tf.reshape(conv3, (-1, final_w*final_h*700))
         W_fc_sigma = get_weights([final_w*final_h*700, conf["n_z"]], "W_fc_sigma")
@@ -59,8 +59,8 @@ class ConvolutionalEncoder(object):
         #self.pred = tf.nn.softmax(tf.add(tf.matmul(conv3_reshape, W_fc), b_fc))
 
         # output parametrization of latent gaussian 
-        self.z_mean = tf.add(tf.matmul(conv3_reshape, W_fc_mean),b_fc_mean)
-        self.z_log_sigma_sq = tf.minimum(100.0,tf.add(tf.matmul(conv3_reshape, W_fc_sigma), b_fc_sigma))
+        self.z_mean = tf.add(tf.matmul(conv3_reshape, W_fc_mean),b_fc_mean, name='z_mean')
+        self.z_log_sigma_sq = tf.minimum(100.0,tf.add(tf.matmul(conv3_reshape, W_fc_sigma), b_fc_sigma), name='z_log_sigma_sq')
 
 class DeconvolutionDecoder(object):
     def __init__(self, z, conf):
@@ -75,9 +75,9 @@ class DeconvolutionDecoder(object):
         h = ((len(value[1]) - 1) * stride_h) + kernel_h - 2 * pad_h
         w = ((len(value[2]) - 1) * stride_w) + kernel_w - 2 * pad_w
         """ 
-        final_w = conf["n_input"][0] / 2 / 2
-        final_h = conf["n_input"][1] / 2 / 2
-        channels = conf["n_input"][2]
+        final_w = int(conf["n_input"][0] / 2 / 2)
+        final_h = int(conf["n_input"][1] / 2 / 2)
+        channels = int(conf["n_input"][2])
         im_w_after1_deconv = ((final_w - 1) * 2)
         im_h_after1_deconv = ((final_h - 1) * 2)
 
@@ -127,7 +127,7 @@ class DeconvolutionDecoder(object):
                                    strides=(1, 1), name="W_deconv1_DC", padding='same',
                                    kernel_initializer=tf.contrib.layers.xavier_initializer())
 
-        self.x_reconstr_mean =  tf.nn.sigmoid(conv0)
+        self.x_reconstr_mean =  tf.nn.sigmoid(conv0, name='x_reconstr_mean')
 
 
 class VariationalCNNAutoencoder(object):
@@ -148,7 +148,7 @@ class VariationalCNNAutoencoder(object):
         
         # tf Graph input
         input_shape = [None].extend(conf["n_input"])
-        self.x = tf.placeholder(tf.float32, input_shape)
+        self.x = tf.placeholder(tf.float32, input_shape, name='x')
         
         # Create autoencoder network
         self._create_network()
@@ -265,7 +265,7 @@ def vae_train(X_train, network_architecture, learning_rate=0.0005,
           batch_size=1000, training_epochs=10, display_step=1):
 
     n_samples = X_train.shape[0]
-    print "n_samples ", n_samples
+    print("n_samples ", n_samples)
 
     vae = VariationalCNNAutoencoder(network_architecture, 
                                  learning_rate=learning_rate, 
@@ -296,23 +296,23 @@ import tensorflow as tf
 import numpy as np
 import glob
 
-def unpickle(file):
-    import cPickle
-    with open(file, 'rb') as fo:
-        dict = cPickle.load(fo)
-    return dict
+#def unpickle(file):
+#    import cPickle
+#    with open(file, 'rb') as fo:
+#        dict = cPickle.load(fo)
+#    return dict
 
 
-test = unpickle("/home/ubuntu/cifar-100-python/test")
-train = unpickle("/home/ubuntu/cifar-100-python/train")
+#test = unpickle("/home/ubuntu/cifar-100-python/test")
+#train = unpickle("/home/ubuntu/cifar-100-python/train")
 
-X_test = test["data"]
-y_test = test["coarse_labels"]
-names_test = test["filenames"]
+#X_test = test["data"]
+#y_test = test["coarse_labels"]
+#names_test = test["filenames"]
 
-X_train = train["data"]
-y_train = train["coarse_labels"]
-names_train = train["filenames"]
+#X_train = train["data"]
+#y_train = train["coarse_labels"]
+#names_train = train["filenames"]
 
 from PIL import Image
 import glob, os
@@ -412,11 +412,11 @@ def load_rgb_images(grasp_dir, regex):
     X = np.stack(X,axis=0)
     return X
 
-X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_rgb.png")
+X_train_unpick = load_box_rgb_images("/data/help_grasps/", "*128_64_rgb.png")
 X_train_unpick.shape
 
-X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_rgb.png")
-X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
+X_train_empty = load_rgb_images("/data/empty_bin_grasps/", "*128_64_rgb.png")
+X_train = load_rgb_images("/data/normal_grasps/", "*128_64_rgb.png")
 
 #X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_depth.png")
 #X_train_unpick.shape
@@ -429,14 +429,14 @@ X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
 
 conf = \
     dict(n_input=(64,100,3), # Input shape of image data 
-         n_z=7)  # dimensionality of latent space
+         n_z=20)  # dimensionality of latent space
 
 #X_train_rshp = np.reshape(X_train, (X_train.shape[0],32,32,3),order='F') / 255.0
 
 
 tf.reset_default_graph()
 vae = vae_train(np.concatenate((X_train[::4],X_train_empty, X_train_unpick)) / 255.0, conf, 
-                training_epochs=25, batch_size=100, learning_rate=0.000805)
+                training_epochs=100, batch_size=100, learning_rate=0.000805)
 #cnn_enc = ConvolutionalEncoder(x, conf)
 #cnn_dec = DeconvolutionDecoder(cnn_enc.z_mean, conf)
 # test encoder network
@@ -563,7 +563,7 @@ import sklearn.linear_model
 from sklearn.model_selection import train_test_split
 
 clf = sklearn.neighbors.KNeighborsClassifier(n_neighbors=3)
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.0, 1.0:0.1},penalty='l1')
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.5, 1.0:0.1},penalty='l2')
 #clf = sklearn.ensemble.RandomForestClassifier(class_weight={0.0: 6.0, 1.0:0.01})
 Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
 y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
@@ -582,7 +582,7 @@ print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / "
 Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
 y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
 
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.25, 1.0:0.1},penalty='l1')
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.5, 1.0:0.1},penalty='l1')
 clf.fit(Z_train, y_train)
 
 def adhoc_clf(img_path, clf):
@@ -592,79 +592,297 @@ def adhoc_clf(img_path, clf):
     x = np.array(img_resize)
     #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
     z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
+    print z
     print img_path
     return clf.predict(z)
 
-import time
-start = time.time()
-print ("\n Unpickable Grasps \n")
-print adhoc_clf("test_unpick_1.png",clf)
-print adhoc_clf("test_unpick_2.png",clf)
-print adhoc_clf("test_unpick_3.png",clf)
-print adhoc_clf("test_unpick_4.png",clf)
-print adhoc_clf("test_unpick_5.png",clf)
-print adhoc_clf("test_unpick_6.png",clf)
-print adhoc_clf("test_unpick_7.png",clf)
-print adhoc_clf("test_unpick_8.png",clf)
-print adhoc_clf("test_unpick_9.png",clf)
-print adhoc_clf("test_unpick_10.png",clf)
-print adhoc_clf("test_unpick_11.png",clf)
-print adhoc_clf("test_unpick_12.png",clf)
-print adhoc_clf("test_unpick_13.png",clf)
-print adhoc_clf("test_unpick_14.png",clf)
-print adhoc_clf("test_unpick_15.png",clf)
-print adhoc_clf("test_unpick_16.png",clf)
-print adhoc_clf("test_unpick_17.png",clf)
-print adhoc_clf("test_unpick_18.png",clf)
-print adhoc_clf("test_unpick_19.png",clf)
-print adhoc_clf("test_unpick_20.png",clf)
-print adhoc_clf("test_unpick_21.png",clf)
-print adhoc_clf("test_unpick_22.png",clf)
-print adhoc_clf("test_unpick_23.png",clf)
-print adhoc_clf("test_unpick_24.png",clf)
+def do_eval():
+    import time
+    start = time.time()
+    print ("\n Unpickable Grasps \n")
+    print adhoc_clf("test_unpick_1.png",clf)
+    print adhoc_clf("test_unpick_2.png",clf)
+    print adhoc_clf("test_unpick_3.png",clf)
+    print adhoc_clf("test_unpick_4.png",clf)
+    print adhoc_clf("test_unpick_5.png",clf)
+    print adhoc_clf("test_unpick_6.png",clf)
+    print adhoc_clf("test_unpick_7.png",clf)
+    print adhoc_clf("test_unpick_8.png",clf)
+    print adhoc_clf("test_unpick_9.png",clf)
+    print adhoc_clf("test_unpick_10.png",clf)
+    print adhoc_clf("test_unpick_11.png",clf)
+    print adhoc_clf("test_unpick_12.png",clf)
+    print adhoc_clf("test_unpick_13.png",clf)
+    print adhoc_clf("test_unpick_14.png",clf)
+    print adhoc_clf("test_unpick_15.png",clf)
+    print adhoc_clf("test_unpick_16.png",clf)
+    print adhoc_clf("test_unpick_17.png",clf)
+    print adhoc_clf("test_unpick_18.png",clf)
+    print adhoc_clf("test_unpick_19.png",clf)
+    print adhoc_clf("test_unpick_20.png",clf)
+    print adhoc_clf("test_unpick_21.png",clf)
+    print adhoc_clf("test_unpick_22.png",clf)
+    print adhoc_clf("test_unpick_23.png",clf)
+    print adhoc_clf("test_unpick_24.png",clf)
 
-print ("\n Normal Grasps \n")
-print adhoc_clf("test_normal_1.png",clf)
-print adhoc_clf("test_normal_2.png",clf)
-print adhoc_clf("test_normal_3.png",clf)
-print adhoc_clf("test_normal_4.png",clf)
-print adhoc_clf("test_normal_5.png",clf)
-print adhoc_clf("test_normal_6.png",clf)
-print adhoc_clf("test_normal_7.png",clf)
-print adhoc_clf("test_normal_8.png",clf)
-print adhoc_clf("test_normal_9.png",clf)
-print adhoc_clf("test_normal_11.png",clf)
-print adhoc_clf("test_normal_12.png",clf)
-print adhoc_clf("test_normal_13.png",clf)
-print adhoc_clf("test_normal_14.png",clf)
-print adhoc_clf("test_normal_15.png",clf)
-print adhoc_clf("test_normal_16.png",clf)
-print adhoc_clf("test_normal_17.png",clf)
-print adhoc_clf("test_normal_18.png",clf)
-print adhoc_clf("test_normal_19.png",clf)
-print adhoc_clf("test_normal_20.png",clf)
-print adhoc_clf("test_normal_21.png",clf)
-print adhoc_clf("test_normal_22.png",clf)
-print adhoc_clf("test_normal_23.png",clf)
-print adhoc_clf("test_normal_24.png",clf)
-print adhoc_clf("test_normal_25.png",clf)
-print adhoc_clf("test_normal_26.png",clf)
-print adhoc_clf("test_normal_27.png",clf)
-print adhoc_clf("test_normal_28.png",clf)
-print adhoc_clf("test_normal_29.png",clf)
-print adhoc_clf("test_normal_30.png",clf)
-print adhoc_clf("test_normal_31.png",clf)
-print adhoc_clf("test_normal_32.png",clf)
-print adhoc_clf("test_normal_33.png",clf)
-print adhoc_clf("test_normal_34.png",clf)
-print adhoc_clf("test_normal_35.png",clf)
-print adhoc_clf("test_normal_36.png",clf)
-print adhoc_clf("test_normal_37.png",clf)
-print adhoc_clf("test_normal_38.png",clf)
-print adhoc_clf("test_normal_39.png",clf)
-print adhoc_clf("test_normal_40.png",clf)
+    print ("\n Normal Grasps \n")
+    print adhoc_clf("test_normal_1.png",clf)
+    print adhoc_clf("test_normal_2.png",clf)
+    print adhoc_clf("test_normal_3.png",clf)
+    print adhoc_clf("test_normal_4.png",clf)
+    print adhoc_clf("test_normal_5.png",clf)
+    print adhoc_clf("test_normal_6.png",clf)
+    print adhoc_clf("test_normal_7.png",clf)
+    print adhoc_clf("test_normal_8.png",clf)
+    print adhoc_clf("test_normal_9.png",clf)
+    print adhoc_clf("test_normal_11.png",clf)
+    print adhoc_clf("test_normal_12.png",clf)
+    print adhoc_clf("test_normal_13.png",clf)
+    print adhoc_clf("test_normal_14.png",clf)
+    print adhoc_clf("test_normal_15.png",clf)
+    print adhoc_clf("test_normal_16.png",clf)
+    print adhoc_clf("test_normal_17.png",clf)
+    print adhoc_clf("test_normal_18.png",clf)
+    print adhoc_clf("test_normal_19.png",clf)
+    print adhoc_clf("test_normal_20.png",clf)
+    print adhoc_clf("test_normal_21.png",clf)
+    print adhoc_clf("test_normal_22.png",clf)
+    print adhoc_clf("test_normal_23.png",clf)
+    print adhoc_clf("test_normal_24.png",clf)
+    print adhoc_clf("test_normal_25.png",clf)
+    print adhoc_clf("test_normal_26.png",clf)
+    print adhoc_clf("test_normal_27.png",clf)
+    print adhoc_clf("test_normal_28.png",clf)
+    print adhoc_clf("test_normal_29.png",clf)
+    print adhoc_clf("test_normal_30.png",clf)
+    print adhoc_clf("test_normal_31.png",clf)
+    print adhoc_clf("test_normal_32.png",clf)
+    print adhoc_clf("test_normal_33.png",clf)
+    print adhoc_clf("test_normal_34.png",clf)
+    print adhoc_clf("test_normal_35.png",clf)
+    print adhoc_clf("test_normal_36.png",clf)
+    print adhoc_clf("test_normal_37.png",clf)
+    print adhoc_clf("test_normal_38.png",clf)
+    print adhoc_clf("test_normal_39.png",clf)
+    print adhoc_clf("test_normal_40.png",clf)
+    print adhoc_clf("test_normal_41.png",clf)
 
 end = time.time()
 print(end - start)
 
 
+import cloudpickle
+def save_object(obj, filename):
+    with open(filename, 'wb') as output:  # Overwrites any existing file.
+        cloudpickle.dump(obj, output)
+
+tf.train.write_graph(vae.sess.graph_def,
+                     "./",
+                     'VCNNAE.pb',
+                     as_text=False)
+
+
+# Testing saving graph from tensorflow
+from tensorflow.python.framework.graph_util import convert_variables_to_constants
+
+# access the default graph
+graph = tf.get_default_graph()
+
+# retrieve the protobuf graph definition
+input_graph_def = graph.as_graph_def()
+
+output_node_names = "x,x_reconstr_mean,z_mean"
+
+# TensorFlow built-in helper to export variables to constants
+output_graph_def = convert_variables_to_constants(
+    sess=vae.sess,
+    input_graph_def=input_graph_def, # GraphDef object holding the network
+    output_node_names=output_node_names.split(",") # List of name strings for the result nodes of the graph
+) 
+
+tf.train.write_graph(output_graph_def,
+                     "./",
+                     'VCNNAE.pb',
+                     as_text=False)
+
+
+
+from sklearn.decomposition import TruncatedSVD
+svd = TruncatedSVD(n_components=7, n_iter=27, random_state=42)
+X_svd = np.concatenate((X_train[::4],X_train_empty, X_train_unpick)) / 255.0
+X_svd = np.reshape(X_svd,(X_svd.shape[0],X_svd.shape[1]*X_svd.shape[2]*X_svd.shape[3]))
+svd.fit(X_svd)
+
+Z_svd_unpick = svd.transform(np.reshape(X_train_unpick,(X_train_unpick.shape[0],X_train_unpick.shape[1]*X_train_unpick.shape[2]*X_train_unpick.shape[3])))
+Z_svd_empty = svd.transform(np.reshape(X_train_empty,(X_train_empty.shape[0],X_train_empty.shape[1]*X_train_empty.shape[2]*X_train_empty.shape[3])))
+Z_svd_normal = svd.transform(np.reshape(X_train[::50],(X_train[::50].shape[0],X_train[::50].shape[1]*X_train[::50].shape[2]*X_train[::50].shape[3])))
+
+Z_svd_train = np.vstack([Z_svd_normal, Z_svd_unpick])
+y_svd_train = np.hstack([np.ones(Z_svd_normal.shape[0]), np.zeros(Z_svd_unpick.shape[0])])
+
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 4.95, 1.0:0.1},penalty='l1')
+Z_train, Z_test, y_train, y_test = train_test_split(Z_svd_train, y_svd_train, test_size=0.4, random_state=42)
+clf.fit(Z_train, y_train)
+y_pred = clf.predict(Z_test)
+
+fpr = np.where((y_pred == 1) & (y_pred != y_test))[0].shape[0]
+fnr = np.where((y_pred == 0) & (y_pred != y_test))[0].shape[0]
+print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0]
+
+
+
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.2, 1.0:0.1},penalty='l1')
+Z_train = np.vstack([Z_normal[:,0,:], Z_unpick[:,0,:]])
+y_train = np.hstack([np.ones(Z_normal.shape[0]), np.zeros(Z_unpick.shape[0])])
+
+Z_train, Z_test, y_train, y_test = train_test_split(Z_train, y_train, test_size=0.4, random_state=42)
+clf.fit(Z_train, y_train)
+y_pred = clf.predict(Z_test)
+
+fpr = np.where((y_pred == 1) & (y_pred != y_test))[0].shape[0]
+fnr = np.where((y_pred == 0) & (y_pred != y_test))[0].shape[0]
+print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0]
+
+
+Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
+y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
+clf.fit(Z_train, y_train)
+
+
+import tensorflow as tf
+import numpy as np
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+
+graph_prefix = ''
+graph_path = './VCNNAE.pb'
+
+with tf.gfile.GFile(graph_path, "rb") as f:
+    fileContent = f.read()
+
+graph_def = tf.GraphDef()
+graph_def.ParseFromString(fileContent)
+
+with tf.Graph().as_default() as graph:
+    tf.import_graph_def(graph_def, name=graph_prefix)
+
+if self.cpu_only:
+config = tf.ConfigProto(
+    device_count={"GPU": 0, "CPU": 1})
+else:
+    config = tf.ConfigProto()
+
+self._graph = graph
+session = tf.Session(
+    graph=graph,
+    config=config)
+
+for op in graph.get_operations():
+    print str(op.name) 
+
+class TensorflowVariationalAutoencoder(object):
+    def __init__(self,
+                 graph_path=None,
+                 graph_prefix='',
+                 input_tensor_name='x',
+                 output_reconstr_tensor_name='x_reconstr_mean',
+                 output_latent_tensor_name='z_mean',
+                 additional_tensors=None,
+                 cpu_only=True,
+                 batch_size=100):
+        self.graph_path = graph_path
+        self.graph_prefix = graph_prefix
+        self.input_tensor_name = input_tensor_name
+        self.output_reconstr_tensor_name = output_reconstr_tensor_name
+        self.output_latent_tensor_name = output_latent_tensor_name
+        self.additional_tensors = additional_tensors or {}
+        self.cpu_only = cpu_only
+        self.batch_size = batch_size
+
+        if self.graph_path is not None:
+            self.load_graph(graph_path=self.graph_path,
+                            graph_prefix=self.graph_prefix,
+                            input_tensor_name=self.input_tensor_name,
+                            output_reconstr_tensor_name=self.output_reconstr_tensor_name,
+                            output_latent_tensor_name=self.output_latent_tensor_name,
+                            additional_tensors=self.additional_tensors,
+                            cpu_only=self.cpu_only,
+                            batch_size=self.batch_size)
+
+
+    def load_graph(self, graph_path,
+               graph_prefix='',
+               input_tensor_name='x',
+               output_reconstr_tensor_name='x_reconstr_mean',
+               output_latent_tensor_name='z_mean',
+               additional_tensors=None,
+               cpu_only=True,
+               batch_size=100):
+        
+        self.graph_path = graph_path
+        self.graph_prefix = graph_prefix
+        self.input_tensor_name = input_tensor_name
+        self.output_reconstr_tensor_name = output_reconstr_tensor_name
+        self.output_latent_tensor_name = output_latent_tensor_name
+        self.additional_tensors = additional_tensors or {}
+        self.cpu_only = cpu_only
+        self.batch_size = batch_size
+
+        with tf.gfile.GFile(graph_path, "rb") as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+
+        # Then, we import the graph_def into a new Graph and returns it
+        with tf.Graph().as_default() as graph:
+            tf.import_graph_def(graph_def, name=self.graph_prefix)
+        self._graph = graph
+
+        if self.cpu_only:
+            config = tf.ConfigProto(
+                device_count={"GPU": 0, "CPU": 1})
+        else:
+            config = tf.ConfigProto()
+
+        self._session = tf.Session(
+            graph=graph,
+            config=config)
+
+        if self.graph_prefix:
+            gp = self.graph_prefix + '/'
+        else:
+            gp = ''
+
+        self._session = tf.Session(
+            graph=graph,
+            config=config)
+
+        # establish input / output tensors of graph
+        self.output_reconstr_tensor = self._graph.get_tensor_by_name(
+            "{}:0".format(self.output_reconstr_tensor_name))
+        self.output_latent_tensor = self._graph.get_tensor_by_name(
+            "{}:0".format(self.output_latent_tensor_name))
+        self.input_tensor = self._graph.get_tensor_by_name(
+            "{}:0".format(self.input_tensor_name))
+
+
+    def transform(self, X):
+        """Transform data by mapping it into the latent space."""
+        # Note: This maps to mean of distribution, we could alternatively
+        # sample from Gaussian distribution
+        return self._session.run(self.output_latent_tensor, feed_dict={self.input_tensor: X})
+
+    def reconstruct(self, X):
+        """ Use VAE to reconstruct given data. """
+        return self._session.run(self.output_reconstr_tensor, 
+                             feed_dict={self.input_tensor: X})
+
+
+
+def adhoc_clf2(img_path, vae):
+    img = Image.open(img_path)
+    img_resize = img.resize((128,64))
+    img_resize = img_resize.crop((0,0,100,64))
+    x = np.array(img_resize)
+    #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
+    z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
+    print(z)
