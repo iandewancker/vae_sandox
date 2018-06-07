@@ -35,13 +35,13 @@ class ConvolutionalEncoder(object):
         conv1 = tf.nn.relu(conv2d(X, W_conv1) + b_conv1)
         pool1 = max_pool_2x2(conv1)
 
-        W_conv2 = get_weights([5, 5, 500, 550], "W_conv2")
+        W_conv2 = get_weights([8, 8, 500, 550], "W_conv2")
         b_conv2 = get_bias([550], "b_conv2")
         conv2 = tf.nn.relu(conv2d(pool1, W_conv2) + b_conv2)
         pool2 = max_pool_2x2(conv2)
 
-        W_conv3 = get_weights([3, 3, 550, 700], "W_conv3")
-        b_conv3 = get_bias([700], "b_conv3")
+        W_conv3 = get_weights([4, 4, 550, 600], "W_conv3")
+        b_conv3 = get_bias([600], "b_conv3")
         conv3 = tf.nn.relu(conv2d(pool2, W_conv3) + b_conv3)
 
         # at this point we have done 2 layes of 2x2 max pooling operations so the image size will be
@@ -50,11 +50,11 @@ class ConvolutionalEncoder(object):
         final_w = int(conf["n_input"][0] / 2 / 2)
         final_h = int(conf["n_input"][1] / 2 / 2)
 
-        conv3_reshape = tf.reshape(conv3, (-1, final_w*final_h*700))
-        W_fc_sigma = get_weights([final_w*final_h*700, conf["n_z"]], "W_fc_sigma")
+        conv3_reshape = tf.reshape(conv3, (-1, final_w*final_h*600))
+        W_fc_sigma = get_weights([final_w*final_h*600, conf["n_z"]], "W_fc_sigma")
         b_fc_sigma = get_bias([conf["n_z"]], "b_fc_sigma")
 
-        W_fc_mean = get_weights([final_w*final_h*700, conf["n_z"]], "W_fc_mean")
+        W_fc_mean = get_weights([final_w*final_h*600, conf["n_z"]], "W_fc_mean")
         b_fc_mean = get_bias([conf["n_z"]], "b_fc_mean")
         #self.pred = tf.nn.softmax(tf.add(tf.matmul(conv3_reshape, W_fc), b_fc))
 
@@ -99,11 +99,11 @@ class DeconvolutionDecoder(object):
 
         # z had dimensions 1 x conf.n_z
         b_fc_DC = get_bias([conf["n_z"]], "b_fc_DC")
-        W_fc_DC = get_weights([conf["n_z"], final_w*final_h*900], "W_fc_DC")
+        W_fc_DC = get_weights([conf["n_z"], final_w*final_h*600], "W_fc_DC")
         conv3_reshape = tf.matmul(tf.add(z, b_fc_DC), W_fc_DC)
-        conv3 = tf.reshape(conv3_reshape, (-1, final_w, final_h, 900))
+        conv3 = tf.reshape(conv3_reshape, (-1, final_w, final_h, 600))
 
-        b_conv3 = get_bias([900], "b_conv3_DC")
+        b_conv3 = get_bias([600], "b_conv3_DC")
         conv2 = tf.layers.conv2d_transpose(tf.nn.relu(conv3 + b_conv3), 500, [2, 2], 
                                            strides=(2, 2), padding='same',name="W_deconv3_DC", 
                                            kernel_initializer=tf.contrib.layers.xavier_initializer())
@@ -206,10 +206,15 @@ class VariationalCNNAutoencoder(object):
         #                   + (1-self.x) * tf.log(1e-8 + 1 - self.x_reconstr_mean),
         #                   None)
 
-        reconstr_loss = \
-            -tf.reduce_sum(x_vectorized * tf.log(1e-6 + x_reconstr_mean_vectorized)
-                           + (1-x_vectorized) * tf.log(1e-6 + 1 - x_reconstr_mean_vectorized),
-                           1)
+        #x_ssim  = tf.reshape(self.x, [-1, self.conf["n_input"][0],self.conf["n_input"][1],self.conf["n_input"][2]], name='x-ssim')
+        #print(x_ssim.get_shape())
+        # power_factors Defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
+        # ssim of 1.0 denotes perfect max so we are trying to minimize -1.0 * ssim
+        self.reconstr_loss = -1.0 * tf.image.ssim_multiscale(self.x, self.x_reconstr_mean, max_val=1.0 ,power_factors=(0.0448, 0.2856, 0.3001))
+        #reconstr_loss = \
+        #    -tf.reduce_sum(x_vectorized * tf.log(1e-6 + x_reconstr_mean_vectorized)
+        #                   + (1-x_vectorized) * tf.log(1e-6 + 1 - x_reconstr_mean_vectorized),
+        #                   1)
 
         # 2.) The latent loss, which is defined as the Kullback Leibler divergence 
         ##    between the distribution in latent space induced by the encoder on 
@@ -217,10 +222,12 @@ class VariationalCNNAutoencoder(object):
         #     This can be interpreted as the number of "nats" required
         #     for transmitting the the latent space distribution given
         #     the prior.
-        latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq 
+        self.latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq 
                                            - tf.square(self.z_mean) 
                                            - tf.exp(self.z_log_sigma_sq), 1)
-        self.cost = tf.reduce_mean(reconstr_loss + latent_loss)   # average over batch
+        # disentanglement co-efficient
+        Beta = 0.00005
+        self.cost = tf.reduce_mean(self.reconstr_loss + Beta*self.latent_loss)   # average over batch
         # Use ADAM optimizer
         # tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.cost)
         self.optimizer = \
@@ -231,9 +238,9 @@ class VariationalCNNAutoencoder(object):
         
         Return cost of mini-batch.
         """
-        opt, cost = self.sess.run((self.optimizer, self.cost), 
+        opt, cost, reconstr_loss, latent_loss = self.sess.run((self.optimizer, self.cost, self.reconstr_loss, self.latent_loss), 
                                   feed_dict={self.x: X})
-        return cost
+        return cost, reconstr_loss, latent_loss
     
     def transform(self, X):
         """Transform data by mapping it into the latent space."""
@@ -280,14 +287,20 @@ def vae_train(X_train, network_architecture, learning_rate=0.0005,
             batch_xs = X_train[(i*batch_size):((i+1)*batch_size),:]
 
             # Fit training using batch data
-            cost = vae.partial_fit(batch_xs)
+            cost, reconstr_loss, latent_loss = vae.partial_fit(batch_xs)
             # Compute average loss
             avg_cost += cost / n_samples * batch_size
+
+            #print("ssim2=","{:.9f}".format(ssim2), 
+            #      "latent_loss=", "{:.9f}".format(latent_loss))
+            #print("reconstr_loss=",reconstr_loss, 
+            #      "latent_loss=", latent_loss)
 
         # Display logs per epoch step
         if epoch % display_step == 0:
             print("Epoch:", '%04d' % (epoch+1), 
                   "cost=", "{:.9f}".format(avg_cost))
+
     return vae
 
 
@@ -412,12 +425,12 @@ def load_rgb_images(grasp_dir, regex):
     X = np.stack(X,axis=0)
     return X
 
-X_train_unpick = load_box_rgb_images("/data/help_grasps/", "*128_64_rgb.png")
+X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_rgb.png")
 X_train_unpick.shape
 
-X_train_empty = load_rgb_images("/data/empty_bin_grasps/", "*128_64_rgb.png")
-X_train = load_rgb_images("/data/normal_grasps/", "*128_64_rgb.png")
-
+X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_rgb.png")
+X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
+X_train_2 = load_rgb_images("/home/ubuntu/data/canonical_train_grasps/", "*128_64_rgb.png")
 #X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_depth.png")
 #X_train_unpick.shape
 
@@ -429,14 +442,14 @@ X_train = load_rgb_images("/data/normal_grasps/", "*128_64_rgb.png")
 
 conf = \
     dict(n_input=(64,100,3), # Input shape of image data 
-         n_z=20)  # dimensionality of latent space
+         n_z=75)  # dimensionality of latent space
 
 #X_train_rshp = np.reshape(X_train, (X_train.shape[0],32,32,3),order='F') / 255.0
 
 
 tf.reset_default_graph()
-vae = vae_train(np.concatenate((X_train[::4],X_train_empty, X_train_unpick)) / 255.0, conf, 
-                training_epochs=100, batch_size=100, learning_rate=0.000805)
+vae = vae_train(np.concatenate((X_train_2[::2], X_train_empty, X_train_unpick)) / 255.0, conf, 
+                training_epochs=20, batch_size=100, learning_rate=0.0008)
 #cnn_enc = ConvolutionalEncoder(x, conf)
 #cnn_dec = DeconvolutionDecoder(cnn_enc.z_mean, conf)
 # test encoder network
@@ -505,14 +518,14 @@ for i in range(X_train_unpick.shape[0]):
     URLs.append(img_url)
     colors.append('red')
 
-for i in range(X_train_empty.shape[0]):
-    z, img_url = show_image_and_reconstruct(vae, X_train_empty, i, "empty_bin")
-    Z.append(z)
-    URLs.append(img_url)
-    colors.append('blue')
+#for i in range(X_train_empty.shape[0]):
+#    z, img_url = show_image_and_reconstruct(vae, X_train_empty, i, "empty_bin")
+#    Z.append(z)
+#    URLs.append(img_url)
+#    colors.append('blue')
 
-for i in range(0,X_train.shape[0],50):
-    z, img_url = show_image_and_reconstruct(vae, X_train, i, "normal")
+for i in range(0,X_train_2.shape[0],100):
+    z, img_url = show_image_and_reconstruct(vae, X_train_2, i, "normal")
     Z.append(z)
     URLs.append(img_url)
     colors.append('green')
@@ -520,8 +533,9 @@ for i in range(0,X_train.shape[0],50):
 Z = np.array(Z)
 
 Z_unpick = Z[0:X_train_unpick.shape[0]]
-Z_empty = Z[X_train_unpick.shape[0]:(X_train_unpick.shape[0]+X_train_empty.shape[0])]
-Z_normal = Z[(X_train_unpick.shape[0]+X_train_empty.shape[0]):]
+#Z_empty = Z[X_train_unpick.shape[0]:(X_train_unpick.shape[0]+X_train_empty.shape[0])]
+#Z_normal = Z[(X_train_unpick.shape[0]+X_train_empty.shape[0]):]
+Z_normal = Z[X_train_unpick.shape[0]:]
 
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
 from bokeh.models import HoverTool
@@ -562,8 +576,159 @@ import sklearn.ensemble
 import sklearn.linear_model
 from sklearn.model_selection import train_test_split
 
+
+import numpy as np
+import cv2
+from matplotlib import pyplot as plt
+import sklearn.cluster
+
+
+def handcraft_transform(imgpath):
+    img = cv2.imread(imgpath,0)
+    # Initiate STAR detector
+    orb = cv2.ORB_create(nfeatures=10000, scoreType=cv2.ORB_FAST_SCORE)        # Initiate SIFT detector
+    # find the keypoints with ORB
+    kp = orb.detect(img,None)
+    # compute the descriptors with ORB
+    kp, des = orb.compute(img, kp)
+    kmean = sklearn.cluster.MiniBatchKMeans(n_clusters=10)
+    kmean.fit(des)
+    z = kmean.cluster_centers_.ravel()
+    return z
+
+def load_handcraft_features_rgb_images(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    Z = []
+    for path in png_paths:
+        z = handcraft_transform(path)
+        Z.append(z)
+    Z = np.stack(Z,axis=0)
+    return Z
+
+def load_handcraft_features_box_rgb_images(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    Z = []
+    for path in png_paths:
+        if any(box_id in path for box_id in box_grasp_ids):
+            z = handcraft_transform(path)
+            Z.append(z)
+    Z = np.stack(Z,axis=0)
+    return Z
+
+Z_handcraft_train_unpick = load_handcraft_features_box_rgb_images("/home/ubuntu/data/help_grasps/", "/rgb.png")
+Z_hancraft_train_normal = load_handcraft_features_rgb_images("/home/ubuntu/data/canonical_train_grasps/", "/rgb.png")
+
+Z_hancraft_train_normal = np.array(Z_hancraft_train_normal)
+Z_handcraft_train_unpick = np.array(Z_handcraft_train_unpick)
+
+Z_train_handcraft_all = np.vstack([Z_hancraft_train_normal, Z_handcraft_train_unpick])
+y_train_handcraft_all = np.hstack([np.ones(Z_hancraft_train_normal.shape[0]), np.zeros(Z_handcraft_train_unpick.shape[0])])
+
+Z_unpick_handcraft_adhoc = [
+    handcraft_transform("test_unpick_1.png"),
+    handcraft_transform("test_unpick_2.png"),
+    handcraft_transform("test_unpick_3.png"),
+    handcraft_transform("test_unpick_4.png"),
+    handcraft_transform("test_unpick_5.png"),
+    handcraft_transform("test_unpick_6.png"),
+    handcraft_transform("test_unpick_7.png"),
+    handcraft_transform("test_unpick_8.png"),
+    handcraft_transform("test_unpick_9.png"),
+    handcraft_transform("test_unpick_10.png"),
+    handcraft_transform("test_unpick_11.png"),
+    handcraft_transform("test_unpick_12.png"),
+    handcraft_transform("test_unpick_13.png"),
+    handcraft_transform("test_unpick_14.png"),
+    handcraft_transform("test_unpick_15.png"),
+    handcraft_transform("test_unpick_16.png"),
+    handcraft_transform("test_unpick_17.png"),
+    handcraft_transform("test_unpick_18.png"),
+    handcraft_transform("test_unpick_19.png"),
+    handcraft_transform("test_unpick_20.png"),
+    handcraft_transform("test_unpick_21.png"),
+    handcraft_transform("test_unpick_22.png"),
+    handcraft_transform("test_unpick_23.png"),
+    handcraft_transform("test_unpick_24.png"),
+    handcraft_transform("test_unpick_25.png"),
+    handcraft_transform("test_unpick_26.png"),
+    handcraft_transform("test_unpick_27.png"),
+    handcraft_transform("test_unpick_28.png"),
+    handcraft_transform("test_unpick_29.png"),
+    handcraft_transform("test_unpick_30.png"),
+    handcraft_transform("test_unpick_31.png"),
+    handcraft_transform("test_unpick_32.png"),
+    handcraft_transform("test_unpick_33.png"),
+    handcraft_transform("test_unpick_34.png"),
+    handcraft_transform("test_unpick_35.png"),
+    handcraft_transform("test_unpick_36.png"),
+    handcraft_transform("test_unpick_37.png"),
+    handcraft_transform("test_unpick_38.png"),
+    handcraft_transform("test_unpick_39.png"),
+    handcraft_transform("test_unpick_40.png"),
+    handcraft_transform("test_unpick_41.png"),
+    handcraft_transform("test_unpick_42.png"),
+    handcraft_transform("test_unpick_43.png"),
+    handcraft_transform("test_unpick_44.png"),
+    handcraft_transform("test_unpick_45.png"),
+    handcraft_transform("test_unpick_46.png"),
+    handcraft_transform("test_unpick_47.png"),
+    handcraft_transform("test_unpick_48.png"),
+    handcraft_transform("test_unpick_49.png"),
+    handcraft_transform("test_unpick_50.png"),
+    handcraft_transform("test_unpick_51.png"),
+    handcraft_transform("test_unpick_52.png"),
+    handcraft_transform("test_unpick_53.png"),
+    handcraft_transform("test_unpick_54.png"),
+    handcraft_transform("test_unpick_55.png"),
+    handcraft_transform("test_unpick_56.png"),
+    handcraft_transform("test_unpick_57.png"),
+    handcraft_transform("test_unpick_58.png"),
+    handcraft_transform("test_unpick_59.png"),
+    handcraft_transform("test_unpick_60.png"),
+    handcraft_transform("test_unpick_61.png"),
+    handcraft_transform("test_unpick_62.png"),
+    handcraft_transform("test_unpick_63.png"),
+    handcraft_transform("test_unpick_64.png"),
+    handcraft_transform("test_unpick_65.png"),
+    handcraft_transform("test_unpick_66.png"),
+    handcraft_transform("test_unpick_67.png"),
+    handcraft_transform("test_unpick_68.png"),
+    handcraft_transform("test_unpick_69.png"),
+    handcraft_transform("test_unpick_70.png"),
+    handcraft_transform("test_unpick_71.png"),
+    handcraft_transform("test_unpick_72.png"),
+    handcraft_transform("test_unpick_73.png"),
+    handcraft_transform("test_unpick_74.png"),
+    handcraft_transform("test_unpick_75.png"),
+    handcraft_transform("test_unpick_76.png"),
+    handcraft_transform("test_unpick_77.png"),
+    handcraft_transform("test_unpick_78.png"),
+    handcraft_transform("test_unpick_79.png"),
+    handcraft_transform("test_unpick_80.png"),
+    handcraft_transform("test_unpick_81.png"),
+    handcraft_transform("test_unpick_82.png"),
+    handcraft_transform("test_unpick_83.png"),
+    handcraft_transform("test_unpick_84.png"),
+    handcraft_transform("test_unpick_85.png"),
+    handcraft_transform("test_unpick_86.png"),
+]
+Z_unpick_handcraft_adhoc = np.vstack(Z_unpick_handcraft_adhoc)
+y_unpick_handcraft_adhoc = np.zeros(Z_unpick_handcraft_adhoc.shape[0])
+
+Z_train_handcraft_all = np.vstack([Z_train_handcraft_all, Z_unpick_handcraft_adhoc])
+y_train_handcraft_all = np.hstack([y_train_handcraft_all, y_unpick_handcraft_adhoc])
+
+Z_train_handcraft_all_reduced = []
+for i in range(Z_train_handcraft_all.shape[0]):
+    z = np.mean(Z_train_handcraft_all[i].reshape(10,32),axis=0)
+    Z_train_handcraft_all_reduced.append(z)
+Z_train_handcraft_all_reduced = np.vstack(Z_train_handcraft_all_reduced)
+"""
 clf = sklearn.neighbors.KNeighborsClassifier(n_neighbors=3)
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.5, 1.0:0.1},penalty='l2')
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 5.6, 1.0:0.1},penalty='l1')
+#clf = sklearn.neighbors.KNeighborsClassifier(n_neighbors=2)
 #clf = sklearn.ensemble.RandomForestClassifier(class_weight={0.0: 6.0, 1.0:0.01})
 Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
 y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
@@ -577,13 +742,197 @@ y_pred = clf.predict(Z_test)
 
 fpr = np.where((y_pred == 1) & (y_pred != y_test))[0].shape[0]
 fnr = np.where((y_pred == 0) & (y_pred != y_test))[0].shape[0]
-print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0]
+print("FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0])
 
 Z_train = np.vstack([Z_normal[:,0,:], Z_empty[:,0,:], Z_unpick[:,0,:]])
 y_train = np.hstack([np.ones(Z_normal.shape[0]+Z_empty.shape[0]), np.zeros(Z_unpick.shape[0])])
+"""
 
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.5, 1.0:0.1},penalty='l1')
-clf.fit(Z_train, y_train)
+#x_recon = vae.reconstruct(np.reshape(X_train/255.0,(X_train.shape[0],64,100,3)))
+Z_all = []
+for i in range(0,X_train_2.shape[0],50):
+    z = vae.transform(np.reshape(X_train_2[i:i+50]/255.0,(X_train_2[i:i+50].shape[0],64,100,3)))
+    Z_all.append(z)
+Z_all_normal = np.vstack(Z_all)
+
+Z_train_all = np.vstack([Z_all_normal, Z_unpick[:,0,:]])
+y_train_all = np.hstack([np.ones(Z_all_normal.shape[0]), np.zeros(Z_unpick.shape[0])])
+
+Z_unpick_adhoc = [
+    adhoc_transform("test_unpick_1.png"),
+    adhoc_transform("test_unpick_2.png"),
+    adhoc_transform("test_unpick_3.png"),
+    adhoc_transform("test_unpick_4.png"),
+    adhoc_transform("test_unpick_5.png"),
+    adhoc_transform("test_unpick_6.png"),
+    adhoc_transform("test_unpick_7.png"),
+    adhoc_transform("test_unpick_8.png"),
+    adhoc_transform("test_unpick_9.png"),
+    adhoc_transform("test_unpick_10.png"),
+    adhoc_transform("test_unpick_11.png"),
+    adhoc_transform("test_unpick_12.png"),
+    adhoc_transform("test_unpick_13.png"),
+    adhoc_transform("test_unpick_14.png"),
+    adhoc_transform("test_unpick_15.png"),
+    adhoc_transform("test_unpick_16.png"),
+    adhoc_transform("test_unpick_17.png"),
+    adhoc_transform("test_unpick_18.png"),
+    adhoc_transform("test_unpick_19.png"),
+    adhoc_transform("test_unpick_20.png"),
+    adhoc_transform("test_unpick_21.png"),
+    adhoc_transform("test_unpick_22.png"),
+    adhoc_transform("test_unpick_23.png"),
+    adhoc_transform("test_unpick_24.png"),
+    adhoc_transform("test_unpick_25.png"),
+    adhoc_transform("test_unpick_26.png"),
+    adhoc_transform("test_unpick_27.png"),
+    adhoc_transform("test_unpick_28.png"),
+    adhoc_transform("test_unpick_29.png"),
+    adhoc_transform("test_unpick_30.png"),
+    adhoc_transform("test_unpick_31.png"),
+    adhoc_transform("test_unpick_32.png"),
+    adhoc_transform("test_unpick_33.png"),
+    adhoc_transform("test_unpick_34.png"),
+    adhoc_transform("test_unpick_35.png"),
+    adhoc_transform("test_unpick_36.png"),
+    adhoc_transform("test_unpick_37.png"),
+    adhoc_transform("test_unpick_38.png"),
+    adhoc_transform("test_unpick_39.png"),
+    adhoc_transform("test_unpick_40.png"),
+    adhoc_transform("test_unpick_41.png"),
+    #adhoc_transform("test_unpick_sim_41.png"),
+    #adhoc_transform("test_unpick_sim2_41.png"),
+    #adhoc_transform("test_unpick_sim3_41.png"),
+    #adhoc_transform("test_unpick_sim4_41.png"),
+    #adhoc_transform("test_unpick_sim5_41.png"),
+    #adhoc_transform("test_unpick_sim6_41.png"),
+    #adhoc_transform("test_unpick_sim7_41.png"),
+    #adhoc_transform("test_unpick_sim8_41.png"),
+    #adhoc_transform("test_unpick_sim9_41.png"),
+    adhoc_transform("test_unpick_42.png"),
+    adhoc_transform("test_unpick_43.png"),
+    adhoc_transform("test_unpick_44.png"),
+    adhoc_transform("test_unpick_45.png"),
+    adhoc_transform("test_unpick_46.png"),
+    adhoc_transform("test_unpick_47.png"),
+    adhoc_transform("test_unpick_48.png"),
+    adhoc_transform("test_unpick_49.png"),
+    adhoc_transform("test_unpick_50.png"),
+    adhoc_transform("test_unpick_51.png"),
+    adhoc_transform("test_unpick_52.png"),
+    adhoc_transform("test_unpick_53.png"),
+    adhoc_transform("test_unpick_54.png"),
+    adhoc_transform("test_unpick_55.png"),
+    adhoc_transform("test_unpick_56.png"),
+    adhoc_transform("test_unpick_57.png"),
+    adhoc_transform("test_unpick_58.png"),
+    adhoc_transform("test_unpick_59.png"),
+    adhoc_transform("test_unpick_60.png"),
+    adhoc_transform("test_unpick_61.png"),
+    adhoc_transform("test_unpick_62.png"),
+    adhoc_transform("test_unpick_63.png"),
+    adhoc_transform("test_unpick_64.png"),
+    adhoc_transform("test_unpick_65.png"),
+    adhoc_transform("test_unpick_66.png"),
+    adhoc_transform("test_unpick_67.png"),
+    adhoc_transform("test_unpick_68.png"),
+    adhoc_transform("test_unpick_69.png"),
+    adhoc_transform("test_unpick_70.png"),
+    adhoc_transform("test_unpick_71.png"),
+    adhoc_transform("test_unpick_72.png"),
+    adhoc_transform("test_unpick_73.png"),
+    adhoc_transform("test_unpick_74.png"),
+    adhoc_transform("test_unpick_75.png"),
+    adhoc_transform("test_unpick_76.png"),
+    adhoc_transform("test_unpick_77.png"),
+    adhoc_transform("test_unpick_78.png"),
+    adhoc_transform("test_unpick_79.png"),
+    adhoc_transform("test_unpick_80.png"),
+    adhoc_transform("test_unpick_81.png"),
+    adhoc_transform("test_unpick_82.png"),
+    adhoc_transform("test_unpick_83.png"),
+    adhoc_transform("test_unpick_84.png"),
+    adhoc_transform("test_unpick_85.png"),
+    adhoc_transform("test_unpick_86.png"),
+]
+Z_unpick_adhoc = np.vstack(Z_unpick_adhoc)
+y_unpick_adhoc = np.zeros(Z_unpick_adhoc.shape[0])
+
+Z_train_all = np.vstack([Z_train_all, Z_unpick_adhoc])
+y_train_all = np.hstack([y_train_all, y_unpick_adhoc])
+
+# just reduced
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 85.5, 1.0:0.1},penalty='l2',C=0.0006)
+do_clf(np.hstack([Z_train_handcraft_all_reduced]), y_train_handcraft_all)
+# with VAE+reduced
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.5, 1.0:0.1},penalty='l2',C=0.0578)
+do_clf(np.hstack([Z_train_handcraft_all_reduced,Z_train_all]), y_train_handcraft_all)
+# just VAE
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 50.5, 1.0:0.1},penalty='l2',C=0.0001)
+do_clf(np.hstack([Z_train_all]), y_train_all)
+# all 10 means
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.5, 1.0:0.1},penalty='l2',C=0.0002)
+do_clf(np.hstack([Z_train_handcraft_all]), y_train_handcraft_all)
+# all 10 means + VAE
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 35.5, 1.0:0.1},penalty='l2',C=0.00001)
+do_clf(np.hstack([Z_train_handcraft_all,Z_train_all]), y_train_handcraft_all)
+#clf = sklearn.neighbors.KNeighborsClassifier(n_neighbors=3)
+#lf = sklearn.ensemble.RandomForestClassifier(class_weight={0.0: 32.6, 1.0:0.1}, max_depth=4, n_estimators=150)
+#np.hstack([Z_train_handcraft_all_reduced,Z_train_all]).shape
+def do_clf(Z_all, y_all):
+    Z_train, Z_test, y_train, y_test = train_test_split(Z_all, y_all, test_size=0.25, random_state=41)
+    clf.fit(Z_train, y_train)
+    y_pred = clf.predict(Z_train)
+    y_pred_test = clf.predict(Z_test)
+    fpr = np.where((y_pred == 1) & (y_pred != y_train))[0].shape[0]
+    fnr = np.where((y_pred == 0) & (y_pred != y_train))[0].shape[0]
+    print("TRAIN FPR : ",fpr," / ",np.where((y_train == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_train == 1))[0].shape[0])
+    fpr = np.where((y_pred_test == 1) & (y_pred_test != y_test))[0].shape[0]
+    fnr = np.where((y_pred_test == 0) & (y_pred_test != y_test))[0].shape[0]
+    print("TEST FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0])
+    test_fpr = fpr / float(np.where((y_test == 0))[0].shape[0])
+    test_fnr = fnr / float(np.where((y_test == 1))[0].shape[0])
+
+    clf.fit(Z_all, y_all)
+    y_pred_all = clf.predict(Z_all)
+    fpr = np.where((y_pred_all == 1) & (y_pred_all != y_all))[0].shape[0]
+    fnr = np.where((y_pred_all == 0) & (y_pred_all != y_all))[0].shape[0]
+    print("TRAIN ALL FPR : ",fpr," / ",np.where((y_all == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_all == 1))[0].shape[0])
+    return (test_fpr, test_fnr)
+
+# search for best LR model
+import itertools
+import random
+best_fnr = 1.0
+unpick_weights = np.linspace(55.0,100,10)
+regualirizations = np.linspace(0.0001,0.01,100)
+for element in itertools.product(unpick_weights,regualirizations):
+    w1 = element[0]
+    C = element[1]
+    clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: w1, 1.0:0.1},penalty='l2',C=C)
+    fpr,fnr = do_clf()
+    if fpr < 0.05 and fnr < best_fnr:
+        print(fnr)
+        best_fnr = fnr
+
+for i in xrange(500):
+    w1 = random.uniform(40.0, 100.0)
+    C = random.uniform(0.0001, 10.0)
+    clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: w1, 1.0:0.1},penalty='l2',C=C)
+    fpr,fnr = do_clf()
+    if fpr < 0.05 and fnr < best_fnr:
+        print(fnr)
+        best_fnr = fnr
+
+def adhoc_transform(img_path):
+    img = Image.open(img_path)
+    img_resize = img.resize((128,64))
+    img_resize = img_resize.crop((0,0,100,64))
+    x = np.array(img_resize)
+    #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
+    z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
+    return z
+
 
 def adhoc_clf(img_path, clf):
     img = Image.open(img_path)
@@ -592,80 +941,111 @@ def adhoc_clf(img_path, clf):
     x = np.array(img_resize)
     #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
     z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
-    print z
-    print img_path
+    #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
+    #print(np.mean(np.abs(x-x_recon),axis=None))
+    #print(z)
+    print(img_path)
+    print(clf.predict(z))
     return clf.predict(z)
 
 def do_eval():
     import time
     start = time.time()
     print ("\n Unpickable Grasps \n")
-    print adhoc_clf("test_unpick_1.png",clf)
-    print adhoc_clf("test_unpick_2.png",clf)
-    print adhoc_clf("test_unpick_3.png",clf)
-    print adhoc_clf("test_unpick_4.png",clf)
-    print adhoc_clf("test_unpick_5.png",clf)
-    print adhoc_clf("test_unpick_6.png",clf)
-    print adhoc_clf("test_unpick_7.png",clf)
-    print adhoc_clf("test_unpick_8.png",clf)
-    print adhoc_clf("test_unpick_9.png",clf)
-    print adhoc_clf("test_unpick_10.png",clf)
-    print adhoc_clf("test_unpick_11.png",clf)
-    print adhoc_clf("test_unpick_12.png",clf)
-    print adhoc_clf("test_unpick_13.png",clf)
-    print adhoc_clf("test_unpick_14.png",clf)
-    print adhoc_clf("test_unpick_15.png",clf)
-    print adhoc_clf("test_unpick_16.png",clf)
-    print adhoc_clf("test_unpick_17.png",clf)
-    print adhoc_clf("test_unpick_18.png",clf)
-    print adhoc_clf("test_unpick_19.png",clf)
-    print adhoc_clf("test_unpick_20.png",clf)
-    print adhoc_clf("test_unpick_21.png",clf)
-    print adhoc_clf("test_unpick_22.png",clf)
-    print adhoc_clf("test_unpick_23.png",clf)
-    print adhoc_clf("test_unpick_24.png",clf)
-
+    unpickables = [
+        adhoc_clf("test_unpick_1.png",clf),
+        adhoc_clf("test_unpick_2.png",clf),
+        adhoc_clf("test_unpick_3.png",clf),
+        adhoc_clf("test_unpick_4.png",clf),
+        adhoc_clf("test_unpick_5.png",clf),
+        adhoc_clf("test_unpick_6.png",clf),
+        adhoc_clf("test_unpick_7.png",clf),
+        adhoc_clf("test_unpick_8.png",clf),
+        adhoc_clf("test_unpick_9.png",clf),
+        adhoc_clf("test_unpick_10.png",clf),
+        adhoc_clf("test_unpick_11.png",clf),
+        adhoc_clf("test_unpick_12.png",clf),
+        adhoc_clf("test_unpick_13.png",clf),
+        adhoc_clf("test_unpick_14.png",clf),
+        adhoc_clf("test_unpick_15.png",clf),
+        adhoc_clf("test_unpick_16.png",clf),
+        adhoc_clf("test_unpick_17.png",clf),
+        adhoc_clf("test_unpick_18.png",clf),
+        adhoc_clf("test_unpick_19.png",clf),
+        adhoc_clf("test_unpick_20.png",clf),
+        adhoc_clf("test_unpick_21.png",clf),
+        adhoc_clf("test_unpick_22.png",clf),
+        adhoc_clf("test_unpick_23.png",clf),
+        adhoc_clf("test_unpick_24.png",clf),
+        adhoc_clf("test_unpick_25.png",clf),
+        adhoc_clf("test_unpick_26.png",clf),
+        adhoc_clf("test_unpick_27.png",clf),
+        adhoc_clf("test_unpick_28.png",clf),
+        adhoc_clf("test_unpick_29.png",clf),
+        adhoc_clf("test_unpick_30.png",clf),
+        adhoc_clf("test_unpick_31.png",clf),
+        adhoc_clf("test_unpick_32.png",clf),
+        adhoc_clf("test_unpick_33.png",clf),
+        adhoc_clf("test_unpick_41.png",clf),
+    ]
+    
     print ("\n Normal Grasps \n")
-    print adhoc_clf("test_normal_1.png",clf)
-    print adhoc_clf("test_normal_2.png",clf)
-    print adhoc_clf("test_normal_3.png",clf)
-    print adhoc_clf("test_normal_4.png",clf)
-    print adhoc_clf("test_normal_5.png",clf)
-    print adhoc_clf("test_normal_6.png",clf)
-    print adhoc_clf("test_normal_7.png",clf)
-    print adhoc_clf("test_normal_8.png",clf)
-    print adhoc_clf("test_normal_9.png",clf)
-    print adhoc_clf("test_normal_11.png",clf)
-    print adhoc_clf("test_normal_12.png",clf)
-    print adhoc_clf("test_normal_13.png",clf)
-    print adhoc_clf("test_normal_14.png",clf)
-    print adhoc_clf("test_normal_15.png",clf)
-    print adhoc_clf("test_normal_16.png",clf)
-    print adhoc_clf("test_normal_17.png",clf)
-    print adhoc_clf("test_normal_18.png",clf)
-    print adhoc_clf("test_normal_19.png",clf)
-    print adhoc_clf("test_normal_20.png",clf)
-    print adhoc_clf("test_normal_21.png",clf)
-    print adhoc_clf("test_normal_22.png",clf)
-    print adhoc_clf("test_normal_23.png",clf)
-    print adhoc_clf("test_normal_24.png",clf)
-    print adhoc_clf("test_normal_25.png",clf)
-    print adhoc_clf("test_normal_26.png",clf)
-    print adhoc_clf("test_normal_27.png",clf)
-    print adhoc_clf("test_normal_28.png",clf)
-    print adhoc_clf("test_normal_29.png",clf)
-    print adhoc_clf("test_normal_30.png",clf)
-    print adhoc_clf("test_normal_31.png",clf)
-    print adhoc_clf("test_normal_32.png",clf)
-    print adhoc_clf("test_normal_33.png",clf)
-    print adhoc_clf("test_normal_34.png",clf)
-    print adhoc_clf("test_normal_35.png",clf)
-    print adhoc_clf("test_normal_36.png",clf)
-    print adhoc_clf("test_normal_37.png",clf)
-    print adhoc_clf("test_normal_38.png",clf)
-    print adhoc_clf("test_normal_39.png",clf)
-    print adhoc_clf("test_normal_40.png",clf)
-    print adhoc_clf("test_normal_41.png",clf)
+    pickables = [
+        adhoc_clf("test_normal_1.png",clf),
+        adhoc_clf("test_normal_2.png",clf),
+        adhoc_clf("test_normal_3.png",clf),
+        adhoc_clf("test_normal_4.png",clf),
+        adhoc_clf("test_normal_5.png",clf),
+        adhoc_clf("test_normal_6.png",clf),
+        adhoc_clf("test_normal_7.png",clf),
+        adhoc_clf("test_normal_8.png",clf),
+        adhoc_clf("test_normal_9.png",clf),
+        adhoc_clf("test_normal_11.png",clf),
+        adhoc_clf("test_normal_12.png",clf),
+        adhoc_clf("test_normal_13.png",clf),
+        adhoc_clf("test_normal_14.png",clf),
+        adhoc_clf("test_normal_15.png",clf),
+        adhoc_clf("test_normal_16.png",clf),
+        adhoc_clf("test_normal_17.png",clf),
+        adhoc_clf("test_normal_18.png",clf),
+        adhoc_clf("test_normal_19.png",clf),
+        adhoc_clf("test_normal_20.png",clf),
+        adhoc_clf("test_normal_21.png",clf),
+        adhoc_clf("test_normal_22.png",clf),
+        adhoc_clf("test_normal_23.png",clf),
+        adhoc_clf("test_normal_24.png",clf),
+        adhoc_clf("test_normal_25.png",clf),
+        adhoc_clf("test_normal_26.png",clf),
+        adhoc_clf("test_normal_27.png",clf),
+        adhoc_clf("test_normal_28.png",clf),
+        adhoc_clf("test_normal_29.png",clf),
+        adhoc_clf("test_normal_30.png",clf),
+        adhoc_clf("test_normal_31.png",clf),
+        adhoc_clf("test_normal_32.png",clf),
+        adhoc_clf("test_normal_33.png",clf),
+        adhoc_clf("test_normal_34.png",clf),
+        adhoc_clf("test_normal_35.png",clf),
+        adhoc_clf("test_normal_36.png",clf),
+        adhoc_clf("test_normal_37.png",clf),
+        adhoc_clf("test_normal_38.png",clf),
+        adhoc_clf("test_normal_39.png",clf),
+        adhoc_clf("test_normal_40.png",clf),
+        adhoc_clf("test_normal_41.png",clf),
+        adhoc_clf("test_normal_42.png",clf),
+        adhoc_clf("test_normal_43.png",clf),
+        adhoc_clf("test_normal_44.png",clf),
+        adhoc_clf("test_normal_45.png",clf),
+        adhoc_clf("test_normal_46.png",clf),
+        adhoc_clf("test_normal_47.png",clf),
+        adhoc_clf("test_normal_48.png",clf),
+        adhoc_clf("test_normal_49.png",clf),
+        adhoc_clf("test_normal_50.png",clf),
+        adhoc_clf("test_normal_51.png",clf),
+    ]
+
+    print ("Unpickable Item Errors : ",np.sum(np.array(unpickables) == 1)," / ",len(unpickables))
+    print ("Pickable Item Correct : ",np.sum(np.array(pickables) == 1)," / ",len(pickables))
+    
 
 end = time.time()
 print(end - start)
@@ -684,12 +1064,17 @@ tf.train.write_graph(vae.sess.graph_def,
 
 # Testing saving graph from tensorflow
 from tensorflow.python.framework.graph_util import convert_variables_to_constants
+from sklearn.externals import joblib
 
 # access the default graph
 graph = tf.get_default_graph()
 
 # retrieve the protobuf graph definition
 input_graph_def = graph.as_graph_def()
+#test_graph_def = tf.graph_util.remove_training_nodes(
+#    input_graph_def,
+#    protected_nodes=None
+#)
 
 output_node_names = "x,x_reconstr_mean,z_mean"
 
@@ -700,35 +1085,40 @@ output_graph_def = convert_variables_to_constants(
     output_node_names=output_node_names.split(",") # List of name strings for the result nodes of the graph
 ) 
 
+model_name = "vae_cnn_17k_latent_75_date_06_01"
+
 tf.train.write_graph(output_graph_def,
                      "./",
-                     'VCNNAE.pb',
+                     model_name+"_graph.pb",
                      as_text=False)
 
+joblib.dump(clf,model_name+"_clf.pkl")
 
 
 from sklearn.decomposition import TruncatedSVD
-svd = TruncatedSVD(n_components=7, n_iter=27, random_state=42)
-X_svd = np.concatenate((X_train[::4],X_train_empty, X_train_unpick)) / 255.0
+svd = TruncatedSVD(n_components=100, n_iter=27, random_state=42)
+X_svd = np.concatenate((X_train_2,X_train_unpick)) / 255.0
 X_svd = np.reshape(X_svd,(X_svd.shape[0],X_svd.shape[1]*X_svd.shape[2]*X_svd.shape[3]))
 svd.fit(X_svd)
 
 Z_svd_unpick = svd.transform(np.reshape(X_train_unpick,(X_train_unpick.shape[0],X_train_unpick.shape[1]*X_train_unpick.shape[2]*X_train_unpick.shape[3])))
-Z_svd_empty = svd.transform(np.reshape(X_train_empty,(X_train_empty.shape[0],X_train_empty.shape[1]*X_train_empty.shape[2]*X_train_empty.shape[3])))
-Z_svd_normal = svd.transform(np.reshape(X_train[::50],(X_train[::50].shape[0],X_train[::50].shape[1]*X_train[::50].shape[2]*X_train[::50].shape[3])))
+#Z_svd_empty = svd.transform(np.reshape(X_train_empty,(X_train_empty.shape[0],X_train_empty.shape[1]*X_train_empty.shape[2]*X_train_empty.shape[3])))
+Z_svd_normal = svd.transform(np.reshape(X_train_2,(X_train_2.shape[0],X_train_2.shape[1]*X_train_2.shape[2]*X_train_2.shape[3])))
 
 Z_svd_train = np.vstack([Z_svd_normal, Z_svd_unpick])
 y_svd_train = np.hstack([np.ones(Z_svd_normal.shape[0]), np.zeros(Z_svd_unpick.shape[0])])
 
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 4.95, 1.0:0.1},penalty='l1')
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 100.95, 1.0:0.1},penalty='l2')
 Z_train, Z_test, y_train, y_test = train_test_split(Z_svd_train, y_svd_train, test_size=0.4, random_state=42)
 clf.fit(Z_train, y_train)
-y_pred = clf.predict(Z_test)
-
-fpr = np.where((y_pred == 1) & (y_pred != y_test))[0].shape[0]
-fnr = np.where((y_pred == 0) & (y_pred != y_test))[0].shape[0]
-print "FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0]
-
+y_pred = clf.predict(Z_train)
+y_pred_test = clf.predict(Z_test)
+fpr = np.where((y_pred == 1) & (y_pred != y_train))[0].shape[0]
+fnr = np.where((y_pred == 0) & (y_pred != y_train))[0].shape[0]
+print("TRAIN FPR : ",fpr," / ",np.where((y_train == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_train == 1))[0].shape[0])
+fpr = np.where((y_pred_test == 1) & (y_pred_test != y_test))[0].shape[0]
+fnr = np.where((y_pred_test == 0) & (y_pred_test != y_test))[0].shape[0]
+print("TEST FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0])
 
 
 clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 1.2, 1.0:0.1},penalty='l1')
@@ -779,6 +1169,11 @@ session = tf.Session(
 
 for op in graph.get_operations():
     print str(op.name) 
+
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+from sklearn.externals import joblib
 
 class TensorflowVariationalAutoencoder(object):
     def __init__(self,
@@ -877,12 +1272,27 @@ class TensorflowVariationalAutoencoder(object):
                              feed_dict={self.input_tensor: X})
 
 
+from sklearn.externals import joblib
 
-def adhoc_clf2(img_path, vae):
+vae = TensorflowVariationalAutoencoder(graph_path="")
+clf = joblib.load("")
+
+def adhoc_clf(img_path, clf):
     img = Image.open(img_path)
     img_resize = img.resize((128,64))
     img_resize = img_resize.crop((0,0,100,64))
     x = np.array(img_resize)
     #x_recon = vae.reconstruct(np.reshape(x/255.0,(1,64,100,3)))
+    vae = clf[0]
+    clf = clf[1]
     z = vae.transform(np.reshape(x/255.0,(1,64,100,3)))
-    print(z)
+    print(img_path)
+    print(clf.predict_proba(z))
+    return clf.predict(z)
+    
+
+import os
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]="0"  # or "1"
+import tensorflow as tf
+sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))

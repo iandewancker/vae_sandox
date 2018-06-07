@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from vae import *
 
+
 def unpickle(file):
     import cPickle
     with open(file, 'rb') as fo:
@@ -53,8 +54,8 @@ def compute_image_delta(x):
 	return np.sum(np.abs(img-x_recon))
 
 
-test = unpickle("/home/idewanck/Downloads/cifar-100-python/test")
-train = unpickle("/home/idewanck/Downloads/cifar-100-python/train")
+test = unpickle("/home/ec2-user/cifar-100-python/test")
+train = unpickle("/home/ec2-user/cifar-100-python/train")
 
 X_test = test["data"]
 y_test = test["coarse_labels"]
@@ -80,7 +81,7 @@ non_bikes_test = np.where(np.array(y_test) != 18)
 bikes_test = np.where(np.array(y_test) == 18)
 
 vae = vae_train(X_train[non_bikes_train], network_architecture, 
-	            training_epochs=35,learning_rate=0.0002)
+	            training_epochs=100,learning_rate=0.0001)
 
 #show_image_and_reconstruct(vae,X_test,names_test,677)
 #show_image_and_reconstruct(vae,X_test,names_test,887)
@@ -113,7 +114,7 @@ plt.show()
 idx_delta_bikes = [(idx,compute_image_delta(X_test[idx])) for idx in bikes_test[0]]
 idx_delta_non_bikes = [(idx,compute_image_delta(X_test[idx])) for idx in non_bikes_test[0]]
 
-anom_thresh = 110000
+anom_thresh = 100000
 tp = [idx for idx,delta in idx_delta_bikes if delta > anom_thresh]
 fp = [idx for idx,delta in idx_delta_non_bikes if delta > anom_thresh]
 
