@@ -100,12 +100,43 @@ def load_rgb_images(grasp_dir, regex):
     X = np.stack(X,axis=0)
     return X
 
+def load_box_rgb_images_full_size(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    X = []
+    for path in png_paths:
+        if any(box_id in path for box_id in box_grasp_ids):
+            img = Image.open(path)
+            img_resize = img.resize((512,254))
+            X.append(np.array(img_resize))
+    X = np.stack(X,axis=0)
+    return X
+
+def load_rgb_images_full_size(grasp_dir, regex):
+    png_paths = glob.glob(grasp_dir+"/**/"+regex)
+    print("{} images found!".format(len(png_paths)))
+    X = []
+    for path in png_paths:
+        img = Image.open(path)
+        img_resize = img.resize((512,254))
+        X.append(np.array(img_resize))
+    X = np.stack(X,axis=0)
+    return X
+
 X_train_unpick = load_box_rgb_images("/home/ubuntu/data/help_grasps/", "*128_64_rgb.png")
 X_train_unpick.shape
 
-X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_rgb.png")
-X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
-X_train_2 = load_rgb_images("/home/ubuntu/data/canonical_train_grasps/", "*128_64_rgb.png")
+#X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "*128_64_rgb.png")
+#X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
+X_train_normal = load_rgb_images("/home/ubuntu/data/canonical_train_grasps/", "*128_64_rgb.png")
+
+# testing with full size images
+#X_train_unpick = load_box_rgb_images_full_size("/home/ubuntu/data/help_grasps/", "rgb.png")
+#X_train_unpick.shape
+
+#X_train_empty = load_rgb_images("/home/ubuntu/data/empty_bin_grasps/", "rgb.png")
+#X_train = load_rgb_images("/home/ubuntu/data/normal_grasps/", "*128_64_rgb.png")
+#X_train_normal = load_rgb_images_full_size("/home/ubuntu/data/canonical_train_grasps/", "rgb.png")
 
 def adhoc_raw_features(img_path):
     img = Image.open(img_path)
@@ -202,14 +233,76 @@ X_unpick_adhoc = [
     adhoc_raw_features("test_unpick_84.png"),
     adhoc_raw_features("test_unpick_85.png"),
     adhoc_raw_features("test_unpick_86.png"),
+    adhoc_raw_features("test_unpick_87.png"),
+    adhoc_raw_features("test_unpick_88.png"),
+    adhoc_raw_features("test_unpick_89.png"),
+    adhoc_raw_features("test_unpick_90.png"),
+    adhoc_raw_features("test_unpick_91.png"),
+    adhoc_raw_features("test_unpick_92.png"),
+    adhoc_raw_features("test_unpick_93.png"),
+    adhoc_raw_features("test_unpick_94.png"),
+    adhoc_raw_features("test_unpick_95.png"),
 ]
 X_unpick_adhoc = np.vstack(X_unpick_adhoc)
 
 X_train_unpick = np.vstack([X_train_unpick,X_unpick_adhoc])
 
 
+# split up normal and unpickable into train and validation set
+test_perc = 0.25
+shuff_idxs = np.arange(X_train_unpick.shape[0])
+np.random.shuffle(shuff_idxs)
+test_idx = int(X_train_unpick.shape[0]*test_perc)
+X_test_unpick = X_train_unpick[shuff_idxs[:test_idx]]
+X_train_unpick = X_train_unpick[shuff_idxs[test_idx:]]
+
+shuff_idxs = np.arange(X_train_normal.shape[0])
+np.random.shuffle(shuff_idxs)
+test_idx = int(X_train_normal.shape[0]*test_perc)
+X_test_normal  = X_train_normal[shuff_idxs[:test_idx]]
+X_train_normal = X_train_normal[shuff_idxs[test_idx:]]
+
+tf.reset_default_graph()
 def mynet(input, reuse=False):
     with tf.name_scope("model"):
+        with tf.variable_scope("conv1") as scope:
+            net = tf.contrib.layers.conv2d(input, 64, [30, 30], stride=7, activation_fn=tf.nn.relu, padding='SAME',
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+                biases_initializer=tf.contrib.layers.xavier_initializer(), scope=scope,reuse=reuse)
+            net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
+        
+        with tf.variable_scope("conv2") as scope:
+            net = tf.contrib.layers.conv2d(net, 64, [10, 10],stride=4, activation_fn=tf.nn.relu, padding='SAME',
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+                biases_initializer=tf.contrib.layers.xavier_initializer(),scope=scope,reuse=reuse)
+            net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
+
+        with tf.variable_scope("conv3") as scope:
+            net = tf.contrib.layers.conv2d(net, 32, [5, 5],stride=2, activation_fn=tf.tanh, padding='SAME',
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+                biases_initializer=tf.contrib.layers.xavier_initializer(),scope=scope,reuse=reuse)
+
+        with tf.variable_scope("fc1") as scope:
+            net = tf.contrib.layers.fully_connected(net,5,scope=scope,reuse=reuse,activation_fn=None)
+            net = tf.sigmoid(net)
+
+        net = tf.layers.flatten(net,name='z')
+        """
+        with tf.variable_scope("conv2") as scope:
+            net = tf.contrib.layers.conv2d(net, 10, [10, 10],stride=4, activation_fn=tf.nn.relu, padding='SAME',
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),scope=scope,reuse=reuse)
+            net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
+
+        with tf.variable_scope("conv3") as scope:
+            net = tf.contrib.layers.conv2d(net, 64, [2, 2], stride=2, activation_fn=tf.nn.relu, padding='SAME',
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),scope=scope,reuse=reuse)
+            net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
+
+        net = tf.layers.flatten(net,name='z')
+        """
+
+        """
+        old mode
         with tf.variable_scope("conv1") as scope:
             net = tf.contrib.layers.conv2d(input, 32, [7, 7], activation_fn=tf.nn.relu, padding='SAME',
                 weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),scope=scope,reuse=reuse)
@@ -231,12 +324,12 @@ def mynet(input, reuse=False):
             net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
 
         with tf.variable_scope("conv5") as scope:
-            net = tf.contrib.layers.conv2d(net, 2, [1, 1], activation_fn=None, padding='SAME',
+            net = tf.contrib.layers.conv2d(net, 10, [1, 1], activation_fn=None, padding='SAME',
                 weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),scope=scope,reuse=reuse)
             net = tf.contrib.layers.max_pool2d(net, [2, 2], padding='SAME')
 
-        net = tf.contrib.layers.flatten(net)
-    
+        net = tf.layers.flatten(net,name='z')
+        """
     return net
 
 
@@ -248,12 +341,12 @@ def contrastive_loss(model1, model2, y, margin):
         return tf.reduce_mean(tmp + tmp2) / 2
 
 
-left = tf.placeholder(tf.float32, [None, 64, 100, 3], name='left')
+left = tf.placeholder(tf.float32, [None, 64, 100, 3], name='x')
 right = tf.placeholder(tf.float32, [None, 64, 100, 3], name='right')
 with tf.name_scope("similarity"):
     label = tf.placeholder(tf.int32, [None, 1], name='label') # 1 if same, 0 if different
     label = tf.to_float(label)
-margin = 10.2
+margin = 1.2
 
 left_output = mynet(left, reuse=False)
 right_output = mynet(right, reuse=True)
@@ -267,14 +360,14 @@ train_right = []
 train_sim = []
 
 # similar normal images : take subset of all pairs
-num_pairs = 15000
-index_list = np.random.choice(range(X_train_2.shape[0]), num_pairs*2, replace=False).tolist()
+num_pairs = 400
+index_list = np.random.choice(range(X_train_normal.shape[0]), num_pairs*2, replace=False).tolist()
 similar_normals_count = 0
 for i in range(num_pairs):
     idx1 = index_list.pop()
     idx2 = index_list.pop()
-    train_left.append(X_train_2[idx1])
-    train_right.append(X_train_2[idx2])
+    train_left.append(X_train_normal[idx1])
+    train_right.append(X_train_normal[idx2])
     train_sim.append(1)
     similar_normals_count += 1
 print ("Generated ",similar_normals_count," similar normal grasp images")
@@ -291,9 +384,9 @@ print ("Generated ",similar_unpickable_count," similar unpickable grasp images")
 
 # dissimilar images
 dissimilar_unpickable_count = 0
-for i in range(0,X_train_2.shape[0],50):
+for i in range(0,X_train_normal.shape[0],150):
     for k in range(X_train_unpick.shape[0]):
-        train_left.append(X_train_2[i])
+        train_left.append(X_train_normal[i])
         train_right.append(X_train_unpick[k])
         train_sim.append(0)
         dissimilar_unpickable_count += 1
@@ -305,18 +398,19 @@ train_sim = np.stack(train_sim,axis=0)
 train_sim = np.reshape(train_sim,(train_sim.shape[0],1))
 
 # shuffle order of training examples
-suff_idxs = np.arange(train_sim.shape[0])
-np.random.shuffle(suff_idxs)
-train_left = train_left[suff_idxs]
-train_right = train_right[suff_idxs]
-train_sim = train_sim[suff_idxs]
+shuff_idxs = np.arange(train_sim.shape[0])
+np.random.shuffle(shuff_idxs)
+train_left = train_left[shuff_idxs]
+train_right = train_right[shuff_idxs]
+train_sim = train_sim[shuff_idxs]
 
-training_epochs = 20
-learning_rate = 0.001
+training_epochs = 45
+learning_rate = 0.00001
+margin = 0.5
 global_step = tf.Variable(0, trainable=False)
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss,global_step=global_step)
 #optimizer = tf.train.MomentumOptimizer(learning_rate , 0.99, use_nesterov=True).minimize(loss, global_step=global_step)
-batch_size = 200
+batch_size = 500
 n_samples = len(train_sim)
 display_step=1
 #tf.reset_default_graph()
@@ -369,47 +463,107 @@ def adhoc_transform(img_path):
     return z[0]
 
 
-Z_all = []
-for i in range(0,X_train_2.shape[0],50):
-    x_input = np.reshape(X_train_2[i:i+50],(X_train_2[i:i+50].shape[0],64,100,3))
+Z_train_normal = []
+for i in range(0,X_train_normal.shape[0],50):
+    x_input = np.reshape(X_train_normal[i:i+50],(X_train_normal[i:i+50].shape[0],64,100,3))
     z = sess.run([left_output], 
             feed_dict={left:x_input})
-    Z_all.append(z[0])
-Z_all_normal = np.vstack(Z_all)
+    Z_train_normal.append(z[0])
+Z_train_normal = np.vstack(Z_train_normal)
 
-Z_unpick = []
+Z_test_normal = []
+for i in range(0,X_test_normal.shape[0],50):
+    x_input = np.reshape(X_test_normal[i:i+50],(X_test_normal[i:i+50].shape[0],64,100,3))
+    z = sess.run([left_output], 
+            feed_dict={left:x_input})
+    Z_test_normal.append(z[0])
+Z_test_normal = np.vstack(Z_test_normal)
+
+Z_train_unpick = []
 for i in range(0,X_train_unpick.shape[0],50):
     x_input = np.reshape(X_train_unpick[i:i+50],(X_train_unpick[i:i+50].shape[0],64,100,3))
     z = sess.run([left_output], 
             feed_dict={left:x_input})
-    Z_unpick.append(z[0])
-Z_unpick = np.vstack(Z_unpick)
+    Z_train_unpick.append(z[0])
+Z_train_unpick = np.vstack(Z_train_unpick)
 
-Z_train_all = np.vstack([Z_all_normal, Z_unpick])
-y_train_all = np.hstack([np.ones(Z_all_normal.shape[0]), np.zeros(Z_unpick.shape[0])])
+Z_test_unpick = []
+for i in range(0,X_test_unpick.shape[0],50):
+    x_input = np.reshape(X_test_unpick[i:i+50],(X_test_unpick[i:i+50].shape[0],64,100,3))
+    z = sess.run([left_output], 
+            feed_dict={left:x_input})
+    Z_test_unpick.append(z[0])
+Z_test_unpick = np.vstack(Z_test_unpick)
 
+Z_train_all = np.vstack([Z_train_normal, Z_train_unpick])
+y_train_all = np.hstack([np.ones(Z_train_normal.shape[0]), np.zeros(Z_train_unpick.shape[0])])
 
-def do_clf(Z_all, y_all):
-    Z_train, Z_test, y_train, y_test = train_test_split(Z_all, y_all, test_size=0.25, random_state=41)
+Z_test_all = np.vstack([Z_test_normal, Z_test_unpick])
+y_test_all = np.hstack([np.ones(Z_test_normal.shape[0]), np.zeros(Z_test_unpick.shape[0])])
+
+def do_clf(Z_train, y_train, Z_test, y_test,clf):
     clf.fit(Z_train, y_train)
-    y_pred = clf.predict(Z_train)
-    y_pred_test = clf.predict(Z_test)
-    fpr = np.where((y_pred == 1) & (y_pred != y_train))[0].shape[0]
-    fnr = np.where((y_pred == 0) & (y_pred != y_train))[0].shape[0]
+    y_train_pred = clf.predict(Z_train)
+    y_test_pred = clf.predict(Z_test)
+    fpr = np.where((y_train_pred == 1) & (y_train_pred != y_train))[0].shape[0]
+    fnr = np.where((y_train_pred == 0) & (y_train_pred != y_train))[0].shape[0]
     print("TRAIN FPR : ",fpr," / ",np.where((y_train == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_train == 1))[0].shape[0])
-    fpr = np.where((y_pred_test == 1) & (y_pred_test != y_test))[0].shape[0]
-    fnr = np.where((y_pred_test == 0) & (y_pred_test != y_test))[0].shape[0]
+    fpr = np.where((y_test_pred == 1) & (y_test_pred != y_test))[0].shape[0]
+    fnr = np.where((y_test_pred == 0) & (y_test_pred != y_test))[0].shape[0]
     print("TEST FPR : ",fpr," / ",np.where((y_test == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_test == 1))[0].shape[0])
     test_fpr = fpr / float(np.where((y_test == 0))[0].shape[0])
     test_fnr = fnr / float(np.where((y_test == 1))[0].shape[0])
 
-    clf.fit(Z_all, y_all)
+    Z_all = np.vstack([Z_train,Z_test])
+    y_all = np.hstack([y_train,y_test])
+    #clf.fit(Z_all, y_all)
     y_pred_all = clf.predict(Z_all)
     fpr = np.where((y_pred_all == 1) & (y_pred_all != y_all))[0].shape[0]
     fnr = np.where((y_pred_all == 0) & (y_pred_all != y_all))[0].shape[0]
-    print("TRAIN ALL FPR : ",fpr," / ",np.where((y_all == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_all == 1))[0].shape[0])
+    print("ALL FPR : ",fpr," / ",np.where((y_all == 0))[0].shape[0]," FNR : ",fnr," / ",np.where((y_all == 1))[0].shape[0])
     return (test_fpr, test_fnr)
 
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 0.5, 1.0:0.1},penalty='l2',C=0.000455)
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.5, 1.0:0.1},C=10.95)
-do_clf(np.hstack([Z_train_all]), y_train_all)
+#clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 0.5, 1.0:0.1},penalty='l2',C=0.000455)
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.1, 1.0:0.1},C=0.0017)
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.1, 1.0:0.1},C=0.409)
+#clf = sklearn.linear_model.LogisticRegression()
+#clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 45.1, 1.0:0.1},C=0.0001)
+#clf = sklearn.linear_model.LogisticRegression()
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 35.1, 1.0:0.1},C=0.001)
+do_clf(Z_train_all, y_train_all, Z_test_all, y_test_all,clf)
+
+
+def adhoc_clf(img_path,clf):
+    z = adhoc_transform(img_path)
+    return clf.predict(z)
+
+from tensorflow.python.framework.graph_util import convert_variables_to_constants
+from sklearn.externals import joblib
+
+# access the default graph
+graph = tf.get_default_graph()
+
+# retrieve the protobuf graph definition
+input_graph_def = graph.as_graph_def()
+#test_graph_def = tf.graph_util.remove_training_nodes(
+#    input_graph_def,
+#    protected_nodes=None
+#)
+
+output_node_names = "x,z"
+
+# TensorFlow built-in helper to export variables to constants
+output_graph_def = convert_variables_to_constants(
+    sess=sess,
+    input_graph_def=input_graph_def, # GraphDef object holding the network
+    output_node_names=output_node_names.split(",") # List of name strings for the result nodes of the graph
+) 
+
+model_name = "siamese_cnn_123k_latent_16_date_06_07"
+
+tf.train.write_graph(output_graph_def,
+                     "./",
+                     model_name+"_graph.pb",
+                     as_text=False)
+
+joblib.dump(clf,model_name+"_clf.pkl")
