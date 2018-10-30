@@ -448,8 +448,8 @@ conf = \
 
 
 tf.reset_default_graph()
-vae = vae_train(np.concatenate((X_train_2[::2], X_train_empty, X_train_unpick)) / 255.0, conf, 
-                training_epochs=20, batch_size=100, learning_rate=0.0008)
+vae = vae_train(np.concatenate((X_train_2, X_train_empty, X_train_unpick)) / 255.0, conf, 
+                training_epochs=100, batch_size=100, learning_rate=0.0008)
 #cnn_enc = ConvolutionalEncoder(x, conf)
 #cnn_dec = DeconvolutionDecoder(cnn_enc.z_mean, conf)
 # test encoder network
@@ -868,7 +868,7 @@ do_clf(np.hstack([Z_train_handcraft_all_reduced]), y_train_handcraft_all)
 clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.5, 1.0:0.1},penalty='l2',C=0.0578)
 do_clf(np.hstack([Z_train_handcraft_all_reduced,Z_train_all]), y_train_handcraft_all)
 # just VAE
-clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 50.5, 1.0:0.1},penalty='l2',C=0.0001)
+clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 33.5, 1.0:0.1},penalty='l2',C=0.000455)
 do_clf(np.hstack([Z_train_all]), y_train_all)
 # all 10 means
 clf = sklearn.linear_model.LogisticRegression(class_weight={0.0: 65.5, 1.0:0.1},penalty='l2',C=0.0002)
